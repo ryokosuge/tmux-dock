@@ -22,15 +22,22 @@ func (f *fakeRunner) run(_ context.Context, args []string) (dock.Result, error) 
 	return f.res, f.err
 }
 
+func TestListArgs(t *testing.T) {
+	want := []string{"-L", "inner-x", "list-sessions", "-F", "#{session_name}"}
+	if got := ListArgs("inner-x"); !reflect.DeepEqual(got, want) {
+		t.Errorf("ListArgs() = %q, want %q", got, want)
+	}
+}
+
 func TestFetch(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("流す引数に普段のソケットの -L と list-sessions -F Format が入る", func(t *testing.T) {
+	t.Run("Runner に ListArgs の引数をそのまま流す", func(t *testing.T) {
 		f := &fakeRunner{}
 		if _, err := Fetch(ctx, f.run, "inner-x"); err != nil {
 			t.Fatalf("Fetch() = %v", err)
 		}
-		want := [][]string{{"-L", "inner-x", "list-sessions", "-F", Format}}
+		want := [][]string{ListArgs("inner-x")}
 		if !reflect.DeepEqual(f.calls, want) {
 			t.Errorf("tmux の引数 = %q, want %q", f.calls, want)
 		}
