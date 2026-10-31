@@ -2,11 +2,17 @@ package dock
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+// maxNameLen はソケット名に入れる t.Name() 由来の部分の最大バイト数。
+const maxNameLen = 16
 
 // tmuxOut は socket の tmux サーバに args を流し、stdout を返す。
 func tmuxOut(t *testing.T, socket string, args ...string) string {
@@ -32,8 +38,14 @@ func newSockets(t *testing.T) (outer, inner string) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Fatalf("tmux が PATH に無い（integration テストは skip せず失敗させる）: %v", err)
 	}
+	// 別プロセスの並行実行でも衝突しないよう pid と nanotime を混ぜる。
+	// ソケットパスは macOS で 104 バイトが上限なので t.Name() 由来の部分は切り詰める。
 	base := strings.NewReplacer("/", "-", " ", "-").Replace(t.Name())
-	outer, inner = "tdk-o-"+base, "tdk-i-"+base
+	if len(base) > maxNameLen {
+		base = base[:maxNameLen]
+	}
+	id := fmt.Sprintf("%d-%x", os.Getpid(), time.Now().UnixNano()&0xffffffff)
+	outer, inner = "tdk-o-"+id+"-"+base, "tdk-i-"+id+"-"+base
 	t.Cleanup(func() {
 		for _, s := range []string{outer, inner} {
 			_ = exec.Command("tmux", "-L", s, "kill-server").Run()
