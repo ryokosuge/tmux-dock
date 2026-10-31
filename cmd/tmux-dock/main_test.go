@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ryokosuge/tmux-dock/internal/rightpane"
 )
 
 const (
@@ -192,4 +194,105 @@ func hasLine(s, line string) bool {
 func tmuxQuiet(socket string, args ...string) string {
 	out, _ := exec.Command("tmux", append([]string{"-L", socket}, args...)...).Output()
 	return string(out)
+}
+
+const (
+	rightPaneTarget = "=dock:.1"
+	rightPaneMarker = "tdk-right-pane-marker"
+)
+
+// startDockWithLastUsedA は普段のサーバにセッション a, b を作って a を最後に使った状態にし、tmux-dock を起動して
+// 右ペインのクライアントが a に繋がるまで待つ。a を先に作るので、普段のサーバの %1 は b のペインになる。
+func startDockWithLastUsedA(t *testing.T, bin string) (outer, inner string) {
+	t.Helper()
+	harness, outer, inner := newSockets(t)
+	tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", "a", "-n", "w")
+	tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", "b", "-n", "w")
+	time.Sleep(activityGap)
+
+	// 準備の attach は別の harness サーバで動かす（harness は起動時の環境を引き継ぐので、tmux-dock 用とは分ける）。
+	prep := harness + "-p"
+	t.Cleanup(func() { _ = exec.Command("tmux", "-L", prep, "kill-server").Run() })
+	tmuxHarness(t, prep, "new-session", "-d", "-x", "160", "-y", "40",
+		"tmux -L "+inner+" attach-session -t '=a'; sleep 300")
+	if got := waitClientSession(t, inner, "a"); got != "a" {
+		t.Fatalf("準備の attach 先 = %q, want %q", got, "a")
+	}
+	tmuxOut(t, inner, "detach-client", "-s", "a")
+	if got := waitClientSession(t, inner, ""); got != "" {
+		t.Fatalf("準備の detach 後のクライアント = %q, want なし", got)
+	}
+
+	startDock(t, bin, harness, outer, inner)
+	if got := waitClientSession(t, inner, "a"); got != "a" {
+		t.Fatalf("右ペインのクライアントの attach 先 = %q, want %q（%v 以内）", got, "a", paneWaitLimit)
+	}
+	return outer, inner
+}
+
+func TestTmuxDockRightPane(t *testing.T) {
+	bin := buildBinary(t)
+
+	t.Run("最後に a を使った状態で起動すると外側の右ペインのクライアントが a に繋がる", func(t *testing.T) {
+		_, inner := startDockWithLastUsedA(t, bin)
+		if got := strings.TrimSpace(tmuxQuiet(inner, "list-clients", "-F", "#{client_session}")); got != "a" {
+			t.Errorf("右ペインのクライアントのセッション = %q, want %q", got, "a")
+		}
+	})
+
+	t.Run("外側の右ペインに送った文字列が普段のサーバのセッション a のペインに現れる", func(t *testing.T) {
+		outer, inner := startDockWithLastUsedA(t, bin)
+
+		tmuxOut(t, outer, "send-keys", "-t", rightPaneTarget, "echo "+rightPaneMarker, "Enter")
+
+		var pane string
+		deadline := time.Now().Add(paneWaitLimit)
+		for !strings.Contains(pane, rightPaneMarker) && time.Now().Before(deadline) {
+			pane = tmuxQuiet(inner, "capture-pane", "-p", "-t", "=a:")
+			time.Sleep(paneWaitStep)
+		}
+		if !strings.Contains(pane, rightPaneMarker) {
+			t.Errorf("セッション a のペインの内容 = %q, want %q を含む（%v 以内）", pane, rightPaneMarker, paneWaitLimit)
+		}
+	})
+
+	t.Run("普段のサーバが無いと右ペインに待機の表示が出て、サーバは立たない", func(t *testing.T) {
+		harness, outer, inner := newSockets(t)
+
+		startDock(t, bin, harness, outer, inner)
+
+		var pane string
+		deadline := time.Now().Add(paneWaitLimit)
+		for !strings.Contains(pane, rightpane.WaitingMessage) && time.Now().Before(deadline) {
+			pane = tmuxQuiet(outer, "capture-pane", "-p", "-J", "-t", rightPaneTarget)
+			time.Sleep(paneWaitStep)
+		}
+		if !strings.Contains(pane, rightpane.WaitingMessage) {
+			t.Fatalf("右ペインの表示 = %q, want %q を含む（%v 以内）", pane, rightpane.WaitingMessage, paneWaitLimit)
+		}
+		time.Sleep(noServerGrace)
+		if out := tmuxQuiet(inner, "list-sessions", "-F", "#{session_name}"); out != "" {
+			t.Errorf("普段のソケットの list-sessions = %q, want サーバが立たず 0 件", out)
+		}
+	})
+
+	t.Run("右ペインを a に繋いだ後に外側を kill-server しても普段のサーバの構成は起動前と同じ", func(t *testing.T) {
+		harness, outer, inner := newSockets(t)
+		tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", "a", "-n", "w")
+		tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", "b", "-n", "w")
+		before := innerLayout(t, inner)
+
+		startDock(t, bin, harness, outer, inner)
+		if got := waitClientSession(t, inner, "a"); got == "" {
+			t.Fatalf("右ペインのクライアントが %v 以内に繋がらない", paneWaitLimit)
+		}
+
+		tmuxOut(t, outer, "kill-server")
+		if got := waitClientSession(t, inner, ""); got != "" {
+			t.Fatalf("外側を終えた後も普段のサーバにクライアント %q が残る", got)
+		}
+		if after := innerLayout(t, inner); after != before {
+			t.Errorf("外側を終えた後の普段のサーバの構成 = %q, want %q", after, before)
+		}
+	})
 }

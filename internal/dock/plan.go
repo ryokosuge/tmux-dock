@@ -10,17 +10,17 @@ type Plan struct {
 
 // NewPlan は外側のソケットだけを指す起動手順を組み立てる。tmux は呼ばない。
 // セッション名は =name で完全一致させ、前方一致・glob で別のセッションに当たらないようにする。
-// leftCommand は左ペインで動かすコマンドで、1 要素ずつ別の引数として渡す（tmux がシェルを通さずそのまま実行する）。
-func NewPlan(cfg Config, confPath string, leftCommand []string) Plan {
+// leftCommand / rightCommand は左右のペインで動かすコマンドで、1 要素ずつ別の引数として渡す（tmux がシェルを通さずそのまま実行する）。
+func NewPlan(cfg Config, confPath string, leftCommand, rightCommand []string) Plan {
 	outer := []string{"-L", cfg.OuterSocket}
 	target := "=" + cfg.SessionName
 
 	return Plan{
 		HasSession: join(outer, "has-session", "-t", target),
 		Create: join(join(outer, "-f", confPath,
-			"new-session", "-d", "-s", cfg.SessionName), append(append([]string{}, leftCommand...),
+			"new-session", "-d", "-s", cfg.SessionName), append(append(append([]string{}, leftCommand...),
 			";",
-			"split-window", "-h", "-t", target+":")...),
+			"split-window", "-h", "-t", target+":"), rightCommand...)...),
 		Attach: join(outer, "attach-session", "-t", target),
 	}
 }

@@ -102,10 +102,12 @@ func run() error {
 	}
 	self, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("左ペインで動かす自分自身の実行ファイルのパスを決められない: %w", err)
+		return fmt.Errorf("左右のペインで動かす自分自身の実行ファイルのパスを決められない: %w", err)
 	}
 	cfg := dock.ConfigFromEnv(os.Getenv)
-	plan := dock.NewPlan(cfg, confPath, []string{self, "list", "--inner-socket", cfg.InnerSocket})
+	plan := dock.NewPlan(cfg, confPath,
+		[]string{self, "list", "--inner-socket", cfg.InnerSocket},
+		[]string{self, "attach", "--inner-socket", cfg.InnerSocket})
 	if err := dock.EnsureSession(context.Background(), dock.ExecRunner, plan); err != nil {
 		return err
 	}
