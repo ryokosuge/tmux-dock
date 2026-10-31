@@ -13,8 +13,10 @@ import (
 const hasSessionMissing = 1
 
 // Result は tmux を 1 回呼んだ結果。ExitCode は tmux を起動できて終了した場合の終了コード。
+// Stdout は tmux の標準出力そのまま（list-sessions のように出力を読む呼び出しが使う）。
 type Result struct {
 	ExitCode int
+	Stdout   []byte
 	Stderr   string
 }
 
@@ -25,10 +27,11 @@ type Runner func(ctx context.Context, args []string) (Result, error)
 // ExecRunner は os/exec で PATH 上の tmux を呼ぶ Runner。
 func ExecRunner(ctx context.Context, args []string) (Result, error) {
 	cmd := exec.CommandContext(ctx, "tmux", args...)
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	err := cmd.Run()
-	res := Result{Stderr: strings.TrimSpace(stderr.String())}
+	res := Result{Stdout: stdout.Bytes(), Stderr: strings.TrimSpace(stderr.String())}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		res.ExitCode = exitErr.ExitCode()
