@@ -1,0 +1,134 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+const (
+	paneWaitLimit = 5 * time.Second
+	paneWaitStep  = 50 * time.Millisecond
+	maxNameLen    = 16
+)
+
+func buildBinary(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "tmux-dock")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	return bin
+}
+
+// newSockets は使い捨ての harness・外側・普段のソケット名を返し、終了時に 3 つのサーバを止める。
+func newSockets(t *testing.T) (harness, outer, inner string) {
+	t.Helper()
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Fatalf("tmux が PATH に無い（integration テストは skip せず失敗させる）: %v", err)
+	}
+	base := strings.NewReplacer("/", "-", " ", "-").Replace(t.Name())
+	if len(base) > maxNameLen {
+		base = base[:maxNameLen]
+	}
+	id := fmt.Sprintf("%d-%x", os.Getpid(), time.Now().UnixNano()&0xffffffff)
+	harness, outer, inner = "tdk-h-"+id+"-"+base, "tdk-o-"+id+"-"+base, "tdk-i-"+id+"-"+base
+	t.Cleanup(func() {
+		for _, s := range []string{harness, outer, inner} {
+			_ = exec.Command("tmux", "-L", s, "kill-server").Run()
+		}
+	})
+	return harness, outer, inner
+}
+
+func tmuxOut(t *testing.T, socket string, args ...string) string {
+	t.Helper()
+	full := append([]string{"-L", socket}, args...)
+	out, err := exec.Command("tmux", full...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("tmux %s: %v (output=%s)", strings.Join(full, " "), err, out)
+	}
+	return string(out)
+}
+
+func innerLayout(t *testing.T, inner string) string {
+	t.Helper()
+	return tmuxOut(t, inner, "list-sessions", "-F", "#{session_id} #{session_name}") +
+		tmuxOut(t, inner, "list-windows", "-a", "-F", "#{session_id} #{window_id} #{window_name}")
+}
+
+func TestTmuxDockCommand(t *testing.T) {
+	bin := buildBinary(t)
+
+	t.Run("端末で実行すると外側に左右 2 ペインのセッションができ attach され、外側を終えても普段のサーバの構成は同じ", func(t *testing.T) {
+		harness, outer, inner := newSockets(t)
+		for _, name := range []string{"a", "b"} {
+			tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", name)
+		}
+		before := innerLayout(t, inner)
+
+		// harness サーバのペインが pty になり、バイナリはその中で動く。
+		// サーバは起動した tmux クライアントの環境を引き継ぐので、ここで環境を渡す。
+		cmd := exec.Command("tmux", "-L", harness, "-f", "/dev/null",
+			"new-session", "-d", "-x", "160", "-y", "40", bin)
+		cmd.Env = append(os.Environ(),
+			"HOME="+t.TempDir(),
+			"TMUX_DOCK_INNER_SOCKET="+inner,
+			"TMUX_DOCK_OUTER_SOCKET="+outer,
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("harness の起動: %v (output=%s)", err, out)
+		}
+
+		// 外側のペインが 2 つになり、クライアントが 1 つ attach するまで待つ。
+		var panes, clients string
+		deadline := time.Now().Add(paneWaitLimit)
+		for {
+			panes = tmuxQuiet(outer, "list-panes", "-a", "-F", "#{pane_left}")
+			clients = tmuxQuiet(outer, "list-clients", "-F", "#{client_session}")
+			if len(strings.Fields(panes)) == 2 && len(strings.Fields(clients)) == 1 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("外側の状態が %v 以内に揃わない: list-panes=%q (want 2 ペイン), list-clients=%q (want 1 クライアント)",
+					paneWaitLimit, panes, clients)
+			}
+			time.Sleep(paneWaitStep)
+		}
+		if f := strings.Fields(panes); f[0] == f[1] {
+			t.Errorf("外側のペインの pane_left = %q, want 互いに異なる左右 2 ペイン", panes)
+		}
+		if want := "dock\n"; clients != want {
+			t.Errorf("attach したセッション = %q, want %q", clients, want)
+		}
+
+		tmuxOut(t, outer, "kill-server")
+		if after := innerLayout(t, inner); after != before {
+			t.Errorf("外側を終えた後の普段のサーバの構成 = %q, want %q", after, before)
+		}
+	})
+
+	t.Run("tmux が PATH に無いとき原因を stderr に出して 0 以外で終わる", func(t *testing.T) {
+		cmd := exec.Command(bin)
+		cmd.Env = []string{"PATH=" + t.TempDir(), "HOME=" + t.TempDir()}
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 1 {
+			t.Errorf("終了コード: err=%v, want 終了コード 1", err)
+		}
+		if want := "tmux が PATH に無い"; !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr = %q, want %q を含む", stderr.String(), want)
+		}
+	})
+}
+
+// tmuxQuiet は socket の tmux に args を流し、stdout を返す。サーバが無い間の失敗は空文字で返す。
+func tmuxQuiet(socket string, args ...string) string {
+	out, _ := exec.Command("tmux", append([]string{"-L", socket}, args...)...).Output()
+	return string(out)
+}
