@@ -1,6 +1,7 @@
 // Command tmux-dock は外側の tmux を用意し、その画面に attach する。
 //
 // サブコマンド list は左ペイン用の一覧画面（--inner-socket <名前>）を出す。
+// サブコマンド attach は右ペイン用で、普段のサーバにセッションができるまで待って attach-session に置き換わる。
 //
 // 終了コード: 0 は attach 先の tmux に置き換わった（このプロセスは戻らない）、
 // 1 は起動の準備か attach に失敗した（原因は stderr に出す）。
@@ -12,21 +13,27 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"syscall"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/ryokosuge/tmux-dock/internal/dock"
 	"github.com/ryokosuge/tmux-dock/internal/listui"
 	"github.com/ryokosuge/tmux-dock/internal/outerconf"
+	"github.com/ryokosuge/tmux-dock/internal/rightpane"
 	"github.com/ryokosuge/tmux-dock/internal/sessionlist"
 )
 
 func main() {
 	var err error
-	if len(os.Args) > 1 && os.Args[1] == "list" {
+	switch {
+	case len(os.Args) > 1 && os.Args[1] == "list":
 		err = runList(os.Args[2:])
-	} else {
+	case len(os.Args) > 1 && os.Args[1] == "attach":
+		err = runAttach(os.Args[2:])
+	default:
 		err = run()
 	}
 	if err != nil {
@@ -49,6 +56,35 @@ func runList(args []string) error {
 		return fmt.Errorf("一覧の画面を動かせなかった: %w", err)
 	}
 	return nil
+}
+
+// attachInterval は普段のサーバのセッションを取り直す間隔。
+const attachInterval = time.Second
+
+// runAttach は右ペインで動く。--inner-socket が無ければ TMUX_DOCK_INNER_SOCKET（未設定なら default）を使う。
+func runAttach(args []string) error {
+	fs := flag.NewFlagSet("attach", flag.ContinueOnError)
+	inner := fs.String("inner-socket", dock.ConfigFromEnv(os.Getenv).InnerSocket, "普段の tmux サーバのソケット名")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	tmuxPath, err := exec.LookPath("tmux")
+	if err != nil {
+		return fmt.Errorf("tmux が PATH に無いため attach できない。tmux をインストールして PATH に通すこと: %w", err)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return rightpane.Run(ctx, *inner, rightpane.Deps{
+		Fetch: func(ctx context.Context) ([]sessionlist.Session, error) {
+			return sessionlist.Fetch(ctx, dock.ExecRunner, *inner)
+		},
+		Exec: func(args, env []string) error {
+			return syscall.Exec(tmuxPath, append([]string{"tmux"}, args...), env)
+		},
+		Environ:  os.Environ,
+		Out:      os.Stdout,
+		Interval: attachInterval,
+	})
 }
 
 func run() error {
