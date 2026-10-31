@@ -9,8 +9,10 @@ const testConf = "/path/to/tmux dock.conf"
 
 var testLeftCommand = []string{"/opt/my tools/tmux-dock", "list", "--inner-socket", "default"}
 
+var testRightCommand = []string{"/opt/my tools/tmux-dock", "attach", "--inner-socket", "default"}
+
 func testPlan() Plan {
-	return NewPlan(ConfigFromEnv(fakeEnv(map[string]string{})), testConf, testLeftCommand)
+	return NewPlan(ConfigFromEnv(fakeEnv(map[string]string{})), testConf, testLeftCommand, testRightCommand)
 }
 
 func TestNewPlan(t *testing.T) {
@@ -18,7 +20,8 @@ func TestNewPlan(t *testing.T) {
 		HasSession: []string{"-L", "tmux-dock", "has-session", "-t", "=dock"},
 		Create: []string{"-L", "tmux-dock", "-f", testConf,
 			"new-session", "-d", "-s", "dock",
-			"/opt/my tools/tmux-dock", "list", "--inner-socket", "default", ";", "split-window", "-h", "-t", "=dock:"},
+			"/opt/my tools/tmux-dock", "list", "--inner-socket", "default", ";", "split-window", "-h", "-t", "=dock:",
+			"/opt/my tools/tmux-dock", "attach", "--inner-socket", "default"},
 		Attach: []string{"-L", "tmux-dock", "attach-session", "-t", "=dock"},
 	}
 	if got := testPlan(); !reflect.DeepEqual(got, want) {
@@ -28,7 +31,7 @@ func TestNewPlan(t *testing.T) {
 
 func TestNewPlanSocketIsolation(t *testing.T) {
 	cfg := Config{InnerSocket: "inner-x", OuterSocket: "outer-x", SessionName: "dock"}
-	plan := NewPlan(cfg, testConf, testLeftCommand)
+	plan := NewPlan(cfg, testConf, testLeftCommand, testRightCommand)
 	for name, args := range map[string][]string{
 		"HasSession": plan.HasSession, "Create": plan.Create, "Attach": plan.Attach,
 	} {
