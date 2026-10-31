@@ -71,18 +71,7 @@ func TestTmuxDockCommand(t *testing.T) {
 		}
 		before := innerLayout(t, inner)
 
-		// harness サーバのペインが pty になり、バイナリはその中で動く。
-		// サーバは起動した tmux クライアントの環境を引き継ぐので、ここで環境を渡す。
-		cmd := exec.Command("tmux", "-L", harness, "-f", "/dev/null",
-			"new-session", "-d", "-x", "160", "-y", "40", bin)
-		cmd.Env = append(os.Environ(),
-			"HOME="+t.TempDir(),
-			"TMUX_DOCK_INNER_SOCKET="+inner,
-			"TMUX_DOCK_OUTER_SOCKET="+outer,
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("harness の起動: %v (output=%s)", err, out)
-		}
+		startDock(t, bin, harness, outer, inner)
 
 		// 外側のペインが 2 つになり、クライアントが 1 つ attach するまで待つ。
 		var panes, clients string
@@ -112,6 +101,39 @@ func TestTmuxDockCommand(t *testing.T) {
 		}
 	})
 
+	t.Run("普段のサーバにセッション a, b があると外側の左ペインに a と b が出て、構成は起動前と同じ", func(t *testing.T) {
+		harness, outer, inner := newSockets(t)
+		for _, name := range []string{"a", "b"} {
+			tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", name)
+		}
+		before := innerLayout(t, inner)
+
+		startDock(t, bin, harness, outer, inner)
+
+		left := waitLeftPane(t, outer, func(s string) bool { return hasLine(s, "a") && hasLine(s, "b") })
+		if !hasLine(left, "a") || !hasLine(left, "b") {
+			t.Errorf("左ペインの表示 = %q, want 行 a と b を含む", left)
+		}
+		if after := innerLayout(t, inner); after != before {
+			t.Errorf("一覧を出した後の普段のサーバの構成 = %q, want %q", after, before)
+		}
+	})
+
+	t.Run("普段のサーバが無いと左ペインに「セッションがありません」が出て、サーバは立たない", func(t *testing.T) {
+		harness, outer, inner := newSockets(t)
+
+		startDock(t, bin, harness, outer, inner)
+
+		const want = "セッションがありません"
+		left := waitLeftPane(t, outer, func(s string) bool { return strings.Contains(s, want) })
+		if !strings.Contains(left, want) {
+			t.Errorf("左ペインの表示 = %q, want %q を含む", left, want)
+		}
+		if out := tmuxQuiet(inner, "list-sessions", "-F", "#{session_name}"); out != "" {
+			t.Errorf("普段のソケットの list-sessions = %q, want サーバが立たず 0 件", out)
+		}
+	})
+
 	t.Run("tmux が PATH に無いとき原因を stderr に出して 0 以外で終わる", func(t *testing.T) {
 		cmd := exec.Command(bin)
 		cmd.Env = []string{"PATH=" + t.TempDir(), "HOME=" + t.TempDir()}
@@ -125,6 +147,45 @@ func TestTmuxDockCommand(t *testing.T) {
 			t.Errorf("stderr = %q, want %q を含む", stderr.String(), want)
 		}
 	})
+}
+
+// startDock は harness サーバのペイン（pty）でバイナリを動かす。
+// サーバは起動した tmux クライアントの環境を引き継ぐので、ここで環境を渡す。
+func startDock(t *testing.T, bin, harness, outer, inner string) {
+	t.Helper()
+	cmd := exec.Command("tmux", "-L", harness, "-f", "/dev/null",
+		"new-session", "-d", "-x", "160", "-y", "40", bin)
+	cmd.Env = append(os.Environ(),
+		"HOME="+t.TempDir(),
+		"TMUX_DOCK_INNER_SOCKET="+inner,
+		"TMUX_DOCK_OUTER_SOCKET="+outer,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("harness の起動: %v (output=%s)", err, out)
+	}
+}
+
+// waitLeftPane は外側の左ペイン（=dock:.0）の表示が ok を満たすまで待ち、最後に読んだ表示を返す。
+func waitLeftPane(t *testing.T, outer string, ok func(string) bool) string {
+	t.Helper()
+	var left string
+	deadline := time.Now().Add(paneWaitLimit)
+	for {
+		left = tmuxQuiet(outer, "capture-pane", "-p", "-t", "=dock:.0")
+		if ok(left) || time.Now().After(deadline) {
+			return left
+		}
+		time.Sleep(paneWaitStep)
+	}
+}
+
+func hasLine(s, line string) bool {
+	for _, l := range strings.Split(s, "\n") {
+		if strings.TrimSpace(l) == line {
+			return true
+		}
+	}
+	return false
 }
 
 // tmuxQuiet は socket の tmux に args を流し、stdout を返す。サーバが無い間の失敗は空文字で返す。

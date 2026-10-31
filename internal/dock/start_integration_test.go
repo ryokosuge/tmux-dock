@@ -67,7 +67,7 @@ func TestEnsureSessionIntegration(t *testing.T) {
 	}
 	before := innerLayout(t, inner)
 
-	p := NewPlan(Config{InnerSocket: inner, OuterSocket: outer, SessionName: SessionName}, "/dev/null")
+	p := NewPlan(Config{InnerSocket: inner, OuterSocket: outer, SessionName: SessionName}, "/dev/null", []string{"sleep", "300"})
 	ctx := context.Background()
 
 	if err := EnsureSession(ctx, ExecRunner, p); err != nil {
