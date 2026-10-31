@@ -16,7 +16,7 @@ tmux-dock を実装する担当（人間・agent）向けの手引き。いま�
 2. `go vet ./...`
 3. `go test ./...`
 
-Makefile はまだ無い（別 Task で追加する）。それまでは上の 3 つのコマンドを直接流す。golangci-lint は足さない。
+入口は repo 直下の `Makefile`（`fmt-check` → `vet` → `test`）。gofmt は未整形ファイルがあっても `gofmt -l` の終了コードが 0 なので、出力が空でなければファイル名を出して失敗させる。golangci-lint は足さない。
 
 ## 言語とライブラリの方針
 
