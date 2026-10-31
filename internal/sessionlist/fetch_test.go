@@ -75,6 +75,24 @@ func TestFetch(t *testing.T) {
 		}
 	})
 
+	for _, reason := range []string{"Permission denied", "Socket operation on non-socket", "File name too long"} {
+		stderr := "error connecting to /tmp/tmux-501/s (" + reason + ")\n"
+		t.Run("サーバ無し以外の接続失敗はエラー: "+reason, func(t *testing.T) {
+			f := &fakeRunner{res: dock.Result{ExitCode: 1, Stderr: stderr}}
+			_, err := Fetch(ctx, f.run, "s")
+			if err == nil || !strings.Contains(err.Error(), reason) {
+				t.Errorf("Fetch() err = %v, want %q を含むエラー", err, reason)
+			}
+		})
+	}
+
+	t.Run("stderr 末尾の改行があってもサーバ無しと判定する", func(t *testing.T) {
+		f := &fakeRunner{res: dock.Result{ExitCode: 1, Stderr: "error connecting to /tmp/x (No such file or directory)\n"}}
+		if got, err := Fetch(ctx, f.run, "s"); err != nil || len(got) != 0 {
+			t.Errorf("Fetch() = %v, %v, want 0 件と nil", got, err)
+		}
+	})
+
 	t.Run("サーバ無しの文言でも終了コードが 1 以外ならエラー", func(t *testing.T) {
 		f := &fakeRunner{res: dock.Result{ExitCode: 2, Stderr: "no server running on /tmp/x"}}
 		if _, err := Fetch(ctx, f.run, "s"); err == nil {
