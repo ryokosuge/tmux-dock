@@ -34,7 +34,7 @@ tmux-dock を実装する担当（人間・agent）向けの手引き。いま�
 | `TMUX_DOCK_INNER_SOCKET` | `default` | 普段の tmux サーバのソケット名 |
 | `TMUX_DOCK_OUTER_SOCKET` | `tmux-dock` | 外側の tmux サーバのソケット名 |
 
-外側の tmux は `tmux -L <outer socket> -f <conf>` で起動する。普段のサーバの一覧は `tmux -L <inner socket> list-sessions -F ...` で読む（サーバが無いと終了コード 1 になり、0 件として扱う）。
+外側の tmux は `tmux -L <outer socket> -f <conf>` で起動する。同梱 conf は外側の prefix / prefix2 を外して打鍵を右の普段のセッションへ素通しにし、root テーブルの F12 で一覧と右のペインを往復させる。普段のサーバの一覧は `tmux -L <inner socket> list-sessions -F ...` で読む（サーバが無いと終了コード 1 になり、0 件として扱う）。
 
 ## テストの作法
 
