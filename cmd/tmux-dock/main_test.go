@@ -263,11 +263,11 @@ func TestTmuxDockRightPane(t *testing.T) {
 
 		var pane string
 		deadline := time.Now().Add(paneWaitLimit)
-		for !strings.Contains(pane, rightpane.WaitingMessage) && time.Now().Before(deadline) {
+		for !showsWaitingMessage(pane) && time.Now().Before(deadline) {
 			pane = tmuxQuiet(outer, "capture-pane", "-p", "-J", "-t", rightPaneTarget)
 			time.Sleep(paneWaitStep)
 		}
-		if !strings.Contains(pane, rightpane.WaitingMessage) {
+		if !showsWaitingMessage(pane) {
 			t.Fatalf("右ペインの表示 = %q, want %q を含む（%v 以内）", pane, rightpane.WaitingMessage, paneWaitLimit)
 		}
 		time.Sleep(noServerGrace)
@@ -295,4 +295,14 @@ func TestTmuxDockRightPane(t *testing.T) {
 			t.Errorf("外側を終えた後の普段のサーバの構成 = %q, want %q", after, before)
 		}
 	})
+}
+
+// showsWaitingMessage は pane に待機の文言が出ているかを返す。
+// 右ペインの幅で文言が折り返されると、tmux の版によっては折り返し位置に空白が入るため、空白を除いて比べる。
+func showsWaitingMessage(pane string) bool {
+	return strings.Contains(removeSpaces(pane), removeSpaces(rightpane.WaitingMessage))
+}
+
+func removeSpaces(s string) string {
+	return strings.Join(strings.Fields(s), "")
 }
