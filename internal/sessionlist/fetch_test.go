@@ -23,7 +23,7 @@ func (f *fakeRunner) run(_ context.Context, args []string) (dock.Result, error) 
 }
 
 func TestListArgs(t *testing.T) {
-	want := []string{"-L", "inner-x", "list-sessions", "-F", "#{session_name}"}
+	want := []string{"-L", "inner-x", "list-sessions", "-F", "#{session_id} #{session_name}"}
 	if got := ListArgs("inner-x"); !reflect.DeepEqual(got, want) {
 		t.Errorf("ListArgs() = %q, want %q", got, want)
 	}
@@ -44,12 +44,12 @@ func TestFetch(t *testing.T) {
 	})
 
 	t.Run("終了コード 0 の出力をセッション名の並びにする", func(t *testing.T) {
-		f := &fakeRunner{res: dock.Result{Stdout: []byte("a\nb\n")}}
+		f := &fakeRunner{res: dock.Result{Stdout: []byte("$0 a\n$1 b\n")}}
 		got, err := Fetch(ctx, f.run, "s")
 		if err != nil {
 			t.Fatalf("Fetch() = %v", err)
 		}
-		if want := []Session{{Name: "a"}, {Name: "b"}}; !reflect.DeepEqual(got, want) {
+		if want := []Session{{ID: "$0", Name: "a"}, {ID: "$1", Name: "b"}}; !reflect.DeepEqual(got, want) {
 			t.Errorf("Fetch() = %v, want %v", got, want)
 		}
 	})
