@@ -7,6 +7,9 @@ import "strings"
 // WaitingMessage は普段の tmux サーバにセッションが無いときの待機表示。
 const WaitingMessage = "普段の tmux サーバにセッションがありません。セッションができるとここに繋がります"
 
+// ClearScreen は attach が残した画面を消す（ESC[2J ESC[H）。WaitingMessage には混ぜない。
+const ClearScreen = "\x1b[2J\x1b[H"
+
 // Action は右ペインがとる動作。
 type Action int
 
