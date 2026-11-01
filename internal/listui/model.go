@@ -164,21 +164,23 @@ func (m Model) updateInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) View() tea.View {
+	var lines []string
 	if m.loadError {
-		return tea.NewView(m.notice)
-	}
-	lines := sessionlist.Lines(m.sessions)
-	if len(m.sessions) > 0 {
-		for i := range lines {
-			mark := noCursorMark
-			if i == m.cursor {
-				mark = cursorMark
+		lines = []string{m.notice}
+	} else {
+		lines = sessionlist.Lines(m.sessions)
+		if len(m.sessions) > 0 {
+			for i := range lines {
+				mark := noCursorMark
+				if i == m.cursor {
+					mark = cursorMark
+				}
+				lines[i] = mark + lines[i]
 			}
-			lines[i] = mark + lines[i]
 		}
-	}
-	if m.notice != "" {
-		lines = append(lines, m.notice)
+		if m.notice != "" {
+			lines = append(lines, m.notice)
+		}
 	}
 	if m.inputting {
 		lines = append(lines, inputPrompt+m.input)

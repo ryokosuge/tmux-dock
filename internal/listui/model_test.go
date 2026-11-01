@@ -340,6 +340,16 @@ func TestModelCreateInput(t *testing.T) {
 		}
 	})
 
+	t.Run("一覧の取得が失敗していても、失敗の行の下に入力行が出る", func(t *testing.T) {
+		m := loadWithCreate(t, func(context.Context) ([]sessionlist.Session, error) {
+			return nil, errors.New("boom")
+		}, recordCreate(new([]string), nil))
+		m = typeText(m, "nab")
+		if got, want := m.View().Content, "一覧を取得できません: boom\n新規セッション名: ab"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("作成関数が nil のとき n を押しても入力は始まらない", func(t *testing.T) {
 		m := loadWithCreate(t, names("a", "b"), nil)
 		if got, want := typeText(m, "n").View().Content, "> a\n  b"; got != want {
