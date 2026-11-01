@@ -1,14 +1,16 @@
 // Command tmux-dock は外側の tmux を用意し、その画面に attach する。
 //
 // サブコマンド list は左ペイン用の一覧画面（--inner-socket <名前> --outer-socket <名前>）を出す。
-// サブコマンド attach は右ペイン用で、普段のサーバにセッションができるまで待って attach-session に置き換わる。
+// サブコマンド attach は右ペイン用で、普段のサーバにセッションができるまで待ち、attach-session を
+// 子プロセスで動かす。attach が終わったら（終了コードによらず）待機に戻って繋ぎ直し続ける。
 //
-// 終了コード: 0 は attach 先の tmux に置き換わった（このプロセスは戻らない）、
-// 1 は起動の準備か attach に失敗した（原因は stderr に出す）。
+// 終了コード: 0 は SIGHUP / SIGINT / SIGTERM で止められた（子の attach も止めてから終わる）、
+// 1 は起動の準備か attach の起動に失敗した（原因は stderr に出す）。
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -70,6 +72,7 @@ func runList(args []string) error {
 const attachInterval = time.Second
 
 // runAttach は右ペインで動く。--inner-socket が無ければ TMUX_DOCK_INNER_SOCKET（未設定なら default）を使う。
+// attach-session は子プロセスで動かし、止める合図（SIGHUP / SIGINT / SIGTERM）で子を止めてから終わる。
 func runAttach(args []string) error {
 	fs := flag.NewFlagSet("attach", flag.ContinueOnError)
 	inner := fs.String("inner-socket", dock.ConfigFromEnv(os.Getenv).InnerSocket, "普段の tmux サーバのソケット名")
@@ -80,19 +83,39 @@ func runAttach(args []string) error {
 	if err != nil {
 		return fmt.Errorf("tmux が PATH に無いため attach できない。tmux をインストールして PATH に通すこと: %w", err)
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	return rightpane.Run(ctx, *inner, rightpane.Deps{
 		Fetch: func(ctx context.Context) ([]sessionlist.Session, error) {
 			return sessionlist.Fetch(ctx, dock.ExecRunner, *inner)
 		},
-		Exec: func(args, env []string) error {
-			return syscall.Exec(tmuxPath, append([]string{"tmux"}, args...), env)
+		Attach: func(ctx context.Context, args, env []string) error {
+			return runChild(ctx, tmuxPath, args, env)
 		},
 		Environ:  os.Environ,
 		Out:      os.Stdout,
 		Interval: attachInterval,
 	})
+}
+
+// attachWaitDelay は子へ SIGTERM を送ってから、終わるのを待つ上限。
+const attachWaitDelay = 3 * time.Second
+
+// runChild は tmux を右ペインの端末につないだ子プロセスとして起動し、終わるまで待つ。
+// 起動できないときだけ error を返し、非 0 の終了は nil にする。ctx が終わると SIGTERM で止める
+// （SIGKILL だと tmux クライアントが端末を raw のまま残すため）。
+func runChild(ctx context.Context, tmuxPath string, args, env []string) error {
+	cmd := exec.CommandContext(ctx, tmuxPath, args...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.Env = env
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = attachWaitDelay
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return nil
+	}
+	return err
 }
 
 func run() error {
