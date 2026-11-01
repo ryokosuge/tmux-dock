@@ -1,0 +1,9 @@
+{
+  "requiredPlugins": [
+    {
+      "source": "git-subdir",
+      "url": "https://github.com/ryokosuge/tmux-dock-plant.git",
+      "path": "devin-plugin"
+    }
+  ]
+}

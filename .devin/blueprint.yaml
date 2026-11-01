@@ -1,0 +1,36 @@
+# Devin の Linux 用 git-backed blueprint
+initialize:
+  - name: Go 1.27 を入れる
+    run: |
+      set -eu
+      archive="$(mktemp)"
+      trap 'rm -f "$archive"' EXIT
+      curl -fsSL "https://go.dev/dl/go1.27.3.linux-$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/').tar.gz" -o "$archive"
+      mkdir -p "$HOME/go-sdk"
+      tar -C "$HOME/go-sdk" -xzf "$archive"
+      export PATH="$HOME/go-sdk/go/bin:$PATH"
+      echo "export PATH=\"$HOME/go-sdk/go/bin:\$PATH\"" >> "$ENVRC"
+      go version
+  - name: tmux を入れる
+    run: |
+      set -eu
+      sudo apt-get update && sudo apt-get install -y tmux
+      tmux -V
+maintenance:
+  - name: 依存を取る
+    run: go mod download
+knowledge:
+  - name: lint
+    contents: |
+      make fmt-check（gofmt -l . の出力が空）と go vet ./...
+  - name: test
+    contents: |
+      go test ./...（integration テストも含む。tmux が PATH に要る）
+      1 パッケージだけ: go test ./internal/<パッケージ> -run <テスト名>
+  - name: verify
+    contents: |
+      PR を出す前に make check（CI と同じ判定）
+      普段の tmux（既定ソケット）には触れず、TMUX_DOCK_INNER_SOCKET / TMUX_DOCK_OUTER_SOCKET に使い捨て名を指して -f /dev/null の試験用サーバで確かめる
+# services: tmux（PATH 上。テストが使い捨てサーバを自前で立てる）
+# secrets: なし
+# evidence: go.mod, Makefile, .github/workflows/ci.yml, AGENTS.md

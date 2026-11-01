@@ -5,7 +5,7 @@ tmux-dock を実装する担当（人間・agent）向けの手引き。いま�
 ## 前提の道具
 
 - Go 1.27 系（`go.mod` は `go 1.27`、module は `github.com/ryokosuge/tmux-dock`）
-- tmux（手元の確認は 3.7c。CI では brew の tmux を使う予定で 3.8 の見込み。tmux の版はまだ固定していない）
+- tmux（手元の確認は 3.7c。CI（`.github/workflows/ci.yml`）は macOS ランナーで `brew install tmux` した最新版を使う。tmux の版は固定していない）
 - make
 
 ## 検査の入口
@@ -48,3 +48,33 @@ tmux-dock を実装する担当（人間・agent）向けの手引き。いま�
 
 - テスト・動作確認のどちらでも、既定ソケットの tmux サーバを操作しない。確認が要るときは使い捨てのソケット名を指す
 - 外側の tmux の操作は外側のソケット（`-L <outer socket>`）だけに向ける
+
+## Verify
+
+PR を出す前に通す（CI と同じ判定）:
+
+```
+make check
+```
+
+環境の疎通（Go と tmux が使えるか）は次で確かめる。専用の doctor コマンドはまだ無い。
+
+```
+go version
+tmux -V
+```
+
+Linux（Ubuntu）の Go 1.27.3 / tmux 3.2a では、既存の `TestTmuxDockRightPane` の待機メッセージ検査が失敗する（`capture-pane -p -J` の結果に空白が入り、期待文字列と一致しない）。fmt-check / vet は通るが、この環境で `make check` が通るとは扱わない。
+
+1 パッケージだけを短く回すときは `go test ./internal/<パッケージ> -run <テスト名>`。integration テストも同じ `go test` で走り、tmux が PATH に無いと skip せず失敗する。
+
+## Conventions
+
+- このファイルや README と既存コードの書き方が食い違うときは既存コードに従い、動いているコードをドキュメントに合わせて書き換えず、見つけた食い違いを PR 本文に列挙する
+- テストの置き場・名前・使い捨てソケットの作り方は、既存の `*_test.go` / `*_integration_test.go` の流儀に合わせる（`tdk-o-` / `tdk-i-` / `tdk-h-` / `tdk-sl-` + pid + nanotime の短い hex、macOS のソケットパス上限 104 バイトに収める）
+
+## Code Review Rules
+
+<!-- レビューで見つけるべき判断の規約を書く（実装の作法は Conventions へ、機械的に検査できるものは lint / CI へ） -->
+
+<!-- evidence: AGENTS.md（既存）, Makefile, .github/workflows/ci.yml, go.mod, internal/*/*_test.go, cmd/tmux-dock/main_test.go -->
