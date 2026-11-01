@@ -13,19 +13,38 @@ import (
 
 type fetchFunc func(ctx context.Context) ([]sessionlist.Session, error)
 
+// switchFunc は Enter で選んだセッションに右ペインを切り替える。
+type switchFunc func(ctx context.Context, s sessionlist.Session) error
+
+const (
+	cursorMark   = "> "
+	noCursorMark = "  "
+)
+
 type sessionsMsg struct {
 	sessions []sessionlist.Session
 	err      error
 }
 
-// Model は起動時に一覧を 1 回だけ取り、その行を描く。キー操作は持たない。
-type Model struct {
-	fetch fetchFunc
-	lines []string
+type switchedMsg struct {
+	session sessionlist.Session
+	err     error
 }
 
-func New(fetch fetchFunc) Model {
-	return Model{fetch: fetch}
+// Model は起動時に一覧を 1 回だけ取り、カーソル付きで描く。Enter で選んだセッションを switchTo に渡す。
+type Model struct {
+	fetch    fetchFunc
+	switchTo switchFunc
+	sessions []sessionlist.Session
+	cursor   int
+	// notice は一覧の代わりに（取得の失敗）または一覧の下に（切り替えの失敗）出す 1 行。
+	notice    string
+	loadError bool
+}
+
+// New の switchTo は nil でもよく、そのとき Enter は何もしない。
+func New(fetch fetchFunc, switchTo switchFunc) Model {
+	return Model{fetch: fetch, switchTo: switchTo}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -36,16 +55,62 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if msg, ok := msg.(sessionsMsg); ok {
+	switch msg := msg.(type) {
+	case sessionsMsg:
+		m.cursor = 0
+		m.notice = ""
+		m.loadError = msg.err != nil
 		if msg.err != nil {
-			m.lines = []string{fmt.Sprintf("一覧を取得できません: %v", msg.err)}
+			m.sessions = nil
+			m.notice = fmt.Sprintf("一覧を取得できません: %v", msg.err)
 		} else {
-			m.lines = sessionlist.Lines(msg.sessions)
+			m.sessions = msg.sessions
+		}
+	case switchedMsg:
+		if msg.err != nil {
+			m.notice = fmt.Sprintf("%s に切り替えられません: %v", msg.session.Name, msg.err)
+		} else {
+			m.notice = ""
+		}
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if m.cursor < len(m.sessions)-1 {
+				m.cursor++
+			}
+		case "enter":
+			if m.switchTo == nil || m.cursor >= len(m.sessions) {
+				return m, nil
+			}
+			s, switchTo := m.sessions[m.cursor], m.switchTo
+			return m, func() tea.Msg {
+				return switchedMsg{session: s, err: switchTo(context.Background(), s)}
+			}
 		}
 	}
 	return m, nil
 }
 
 func (m Model) View() tea.View {
-	return tea.NewView(strings.Join(m.lines, "\n"))
+	if m.loadError {
+		return tea.NewView(m.notice)
+	}
+	lines := sessionlist.Lines(m.sessions)
+	if len(m.sessions) > 0 {
+		for i := range lines {
+			mark := noCursorMark
+			if i == m.cursor {
+				mark = cursorMark
+			}
+			lines[i] = mark + lines[i]
+		}
+	}
+	if m.notice != "" {
+		lines = append(lines, m.notice)
+	}
+	return tea.NewView(strings.Join(lines, "\n"))
 }

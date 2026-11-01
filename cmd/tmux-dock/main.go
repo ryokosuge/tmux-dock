@@ -52,7 +52,7 @@ func runList(args []string) error {
 	fetch := func(ctx context.Context) ([]sessionlist.Session, error) {
 		return sessionlist.Fetch(ctx, dock.ExecRunner, *inner)
 	}
-	if _, err := tea.NewProgram(listui.New(fetch)).Run(); err != nil {
+	if _, err := tea.NewProgram(listui.New(fetch, nil)).Run(); err != nil {
 		return fmt.Errorf("一覧の画面を動かせなかった: %w", err)
 	}
 	return nil

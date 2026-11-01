@@ -183,7 +183,7 @@ func waitLeftPane(t *testing.T, outer string, ok func(string) bool) string {
 
 func hasLine(s, line string) bool {
 	for _, l := range strings.Split(s, "\n") {
-		if strings.TrimSpace(l) == line {
+		if strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), ">")) == line {
 			return true
 		}
 	}
