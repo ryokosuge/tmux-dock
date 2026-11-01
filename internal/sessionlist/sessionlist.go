@@ -2,15 +2,16 @@ package sessionlist
 
 import "strings"
 
-// Format は list-sessions に渡す -F の書式。1 行 1 セッション、セッション名のみ。
-// 区切り文字でフィールドを増やすと、名前に同じ文字が入ったときに割れる。
-const Format = "#{session_name}"
+// Format は list-sessions に渡す -F の書式。1 行 1 セッション、先頭が session_id、空白 1 つを挟んで残り全部がセッション名。
+// id は $ と数字だけで空白を含まないので、先頭の 1 つだけで分ければ名前に空白や区切りが入っても割れない。
+const Format = "#{session_id} #{session_name}"
 
 // emptyMessage は 0 件のときに左ペインへ出す行。
 const emptyMessage = "セッションがありません"
 
 // Session は普段の tmux サーバにある 1 つのセッション。
 type Session struct {
+	ID   string
 	Name string
 }
 
@@ -24,7 +25,8 @@ func Parse(out []byte) []Session {
 	lines := strings.Split(text, "\n")
 	ss := make([]Session, len(lines))
 	for i, l := range lines {
-		ss[i] = Session{Name: l}
+		id, name, _ := strings.Cut(l, " ")
+		ss[i] = Session{ID: id, Name: name}
 	}
 	return ss
 }

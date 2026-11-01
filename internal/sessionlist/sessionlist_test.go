@@ -16,11 +16,11 @@ func TestLines(t *testing.T) {
 		out  string
 		want []string
 	}{
-		{"a, b, c の 3 行がこの順で並ぶ", "a\nb\nc\n", []string{"a", "b", "c"}},
+		{"a, b, c の 3 行がこの順で並ぶ", "$0 a\n$1 b\n$2 c\n", []string{"a", "b", "c"}},
 		{"空の出力は「セッションがありません」の 1 行", "", []string{"セッションがありません"}},
-		{"空白を含む名前は 1 つの名前", "my work\nb\n", []string{"my work", "b"}},
-		{": を含む名前は 1 つの名前", "a:b\nc\n", []string{"a:b", "c"}},
-		{"末尾の改行が無くても同じ行数", "a\nb", []string{"a", "b"}},
+		{"空白を含む名前は 1 つの名前", "$0 my work\n$1 b\n", []string{"my work", "b"}},
+		{": を含む名前は 1 つの名前", "$0 a:b\n$1 c\n", []string{"a:b", "c"}},
+		{"末尾の改行が無くても同じ行数", "$0 a\n$1 b", []string{"a", "b"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -38,7 +38,8 @@ func TestParse(t *testing.T) {
 		want []Session
 	}{
 		{"空の出力は 0 件", "", nil},
-		{"空白と : を含む名前を 1 つの名前として解析する", "my work\na:b\n", []Session{{Name: "my work"}, {Name: "a:b"}}},
+		{"空白と : を含む名前を 1 つの名前として解析する", "$0 my work\n$1 a:b\n", []Session{{ID: "$0", Name: "my work"}, {ID: "$1", Name: "a:b"}}},
+		{"名前に空白が複数あっても先頭の id だけで分ける", "$12 a  b $3\n", []Session{{ID: "$12", Name: "a  b $3"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
