@@ -20,7 +20,7 @@ func load(t *testing.T, fetch fetchFunc) (Model, tea.Cmd) {
 
 func loadWith(t *testing.T, fetch fetchFunc, switchTo switchFunc) (Model, tea.Cmd) {
 	t.Helper()
-	m := New(fetch, switchTo)
+	m := New(fetch, switchTo, nil)
 	cmd := m.Init()
 	if cmd == nil {
 		t.Fatal("Init() = nil, want 取得の Cmd")
@@ -202,6 +202,158 @@ func TestModelSwitch(t *testing.T) {
 		}
 		if got, want := press(m, "up").View().Content, "> a\n  b\nb に切り替えられません: boom"; got != want {
 			t.Errorf("失敗後に ↑ した View() = %q, want %q", got, want)
+		}
+	})
+}
+
+func loadWithCreate(t *testing.T, fetch fetchFunc, create createFunc) Model {
+	t.Helper()
+	m := New(fetch, nil, create)
+	next, _ := m.Update(m.Init()())
+	return next.(Model)
+}
+
+// typeText は text を 1 文字ずつ印字できるキーとして Update に渡す。
+func typeText(m Model, text string) Model {
+	for _, r := range text {
+		next, _ := m.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+		m = next.(Model)
+	}
+	return m
+}
+
+func pressKey(m Model, code rune) (Model, tea.Cmd) {
+	next, cmd := m.Update(tea.KeyPressMsg{Code: code})
+	return next.(Model), cmd
+}
+
+func recordCreate(names *[]string, err error) createFunc {
+	return func(_ context.Context, name string) error {
+		*names = append(*names, name)
+		return err
+	}
+}
+
+func TestModelCreateInput(t *testing.T) {
+	t.Run("n を押して文字を打つたびに入力中の名前が 1 行に伸び、Backspace で日本語も 1 文字ずつ縮む", func(t *testing.T) {
+		var created []string
+		m := loadWithCreate(t, names("a", "b"), recordCreate(&created, nil))
+		m = typeText(m, "n")
+		if got, want := m.View().Content, "> a\n  b\n新規セッション名: "; got != want {
+			t.Errorf("n の後の View() = %q, want %q", got, want)
+		}
+		m = typeText(m, "ab日本")
+		if got, want := m.View().Content, "> a\n  b\n新規セッション名: ab日本"; got != want {
+			t.Errorf("打鍵の後の View() = %q, want %q", got, want)
+		}
+		m, _ = pressKey(m, tea.KeyBackspace)
+		if got, want := m.View().Content, "> a\n  b\n新規セッション名: ab日"; got != want {
+			t.Errorf("Backspace の後の View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("入力中に j / k / n を打つとカーソルは動かず名前に足される", func(t *testing.T) {
+		m := loadWithCreate(t, names("a", "b"), recordCreate(new([]string), nil))
+		m = typeText(m, "njkn")
+		if got, want := m.View().Content, "> a\n  b\n新規セッション名: jkn"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("Esc で取り消すと作成関数は呼ばれず、入力前のカーソル位置の一覧に戻る", func(t *testing.T) {
+		var created []string
+		m := loadWithCreate(t, names("a", "b"), recordCreate(&created, nil))
+		m = press(m, "down")
+		m = typeText(m, "nxy")
+		m, _ = pressKey(m, tea.KeyEscape)
+		if got, want := m.View().Content, "  a\n> b"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+		if len(created) != 0 {
+			t.Errorf("作成関数に渡った名前 = %v, want なし", created)
+		}
+	})
+
+	t.Run("空と空白だけの名前で Enter しても作成関数は呼ばれず、入力前のカーソル位置の一覧に戻る", func(t *testing.T) {
+		for _, text := range []string{"n", "n  "} {
+			var created []string
+			m := loadWithCreate(t, names("a", "b"), recordCreate(&created, nil))
+			m = press(m, "down")
+			m = typeText(m, text)
+			m, cmd := pressKey(m, tea.KeyEnter)
+			if cmd != nil {
+				cmd()
+			}
+			if got, want := m.View().Content, "  a\n> b"; got != want {
+				t.Errorf("%q の後の View() = %q, want %q", text, got, want)
+			}
+			if len(created) != 0 {
+				t.Errorf("%q の後に作成関数に渡った名前 = %v, want なし", text, created)
+			}
+		}
+	})
+
+	t.Run("名前を入れて Enter すると作成関数に名前が渡り、成功すると入力前のカーソル位置の一覧に戻る", func(t *testing.T) {
+		var created []string
+		m := loadWithCreate(t, names("a", "b"), recordCreate(&created, nil))
+		m = press(m, "down")
+		m = typeText(m, "nwork")
+		m, cmd := pressKey(m, tea.KeyEnter)
+		if cmd == nil {
+			t.Fatal("Enter の Update = nil, want 作成の Cmd")
+		}
+		if len(created) != 0 {
+			t.Fatalf("Cmd を実行する前に作成関数が呼ばれた: %v", created)
+		}
+		next, _ := m.Update(cmd())
+		if want := []string{"work"}; !reflect.DeepEqual(created, want) {
+			t.Errorf("作成関数に渡った名前 = %v, want %v", created, want)
+		}
+		if got, want := next.(Model).View().Content, "  a\n> b"; got != want {
+			t.Errorf("成功後の View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("作成が失敗したら入力を閉じず、理由の 1 行を出して名前の入力を続けられる", func(t *testing.T) {
+		var created []string
+		m := loadWithCreate(t, names("a", "b"), recordCreate(&created, errors.New("boom")))
+		m = typeText(m, "nwork")
+		m, cmd := pressKey(m, tea.KeyEnter)
+		next, _ := m.Update(cmd())
+		m = next.(Model)
+		if got, want := m.View().Content, "> a\n  b\n新規セッション名: work\n作成できません: boom"; got != want {
+			t.Errorf("失敗後の View() = %q, want %q", got, want)
+		}
+		m = typeText(m, "2")
+		if got, want := m.View().Content, "> a\n  b\n新規セッション名: work2\n作成できません: boom"; got != want {
+			t.Errorf("続けて入力した後の View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("作成関数の結果が返るまでの打鍵は名前に足されない", func(t *testing.T) {
+		m := loadWithCreate(t, names("a"), recordCreate(new([]string), nil))
+		m = typeText(m, "nw")
+		m, _ = pressKey(m, tea.KeyEnter)
+		m = typeText(m, "x")
+		if got, want := m.View().Content, "> a\n新規セッション名: w"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("一覧の取得が失敗していても、失敗の行の下に入力行が出る", func(t *testing.T) {
+		m := loadWithCreate(t, func(context.Context) ([]sessionlist.Session, error) {
+			return nil, errors.New("boom")
+		}, recordCreate(new([]string), nil))
+		m = typeText(m, "nab")
+		if got, want := m.View().Content, "一覧を取得できません: boom\n新規セッション名: ab"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("作成関数が nil のとき n を押しても入力は始まらない", func(t *testing.T) {
+		m := loadWithCreate(t, names("a", "b"), nil)
+		if got, want := typeText(m, "n").View().Content, "> a\n  b"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
 		}
 	})
 }
