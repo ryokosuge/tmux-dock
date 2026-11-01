@@ -1,6 +1,6 @@
 // Command tmux-dock は外側の tmux を用意し、その画面に attach する。
 //
-// サブコマンド list は左ペイン用の一覧画面（--inner-socket <名前>）を出す。
+// サブコマンド list は左ペイン用の一覧画面（--inner-socket <名前> --outer-socket <名前>）を出す。
 // サブコマンド attach は右ペイン用で、普段のサーバにセッションができるまで待って attach-session に置き換わる。
 //
 // 終了コード: 0 は attach 先の tmux に置き換わった（このプロセスは戻らない）、
@@ -24,6 +24,7 @@ import (
 	"github.com/ryokosuge/tmux-dock/internal/outerconf"
 	"github.com/ryokosuge/tmux-dock/internal/rightpane"
 	"github.com/ryokosuge/tmux-dock/internal/sessionlist"
+	"github.com/ryokosuge/tmux-dock/internal/switcher"
 )
 
 func main() {
@@ -42,17 +43,24 @@ func main() {
 	}
 }
 
-// runList は左ペインで動く一覧の画面。--inner-socket が無ければ TMUX_DOCK_INNER_SOCKET（未設定なら default）を使う。
+// runList は左ペインで動く一覧の画面。--inner-socket / --outer-socket が無ければ
+// TMUX_DOCK_INNER_SOCKET / TMUX_DOCK_OUTER_SOCKET（未設定なら既定）を使う。
 func runList(args []string) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
-	inner := fs.String("inner-socket", dock.ConfigFromEnv(os.Getenv).InnerSocket, "普段の tmux サーバのソケット名")
+	envCfg := dock.ConfigFromEnv(os.Getenv)
+	inner := fs.String("inner-socket", envCfg.InnerSocket, "普段の tmux サーバのソケット名")
+	outer := fs.String("outer-socket", envCfg.OuterSocket, "外側の tmux サーバのソケット名")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	fetch := func(ctx context.Context) ([]sessionlist.Session, error) {
 		return sessionlist.Fetch(ctx, dock.ExecRunner, *inner)
 	}
-	if _, err := tea.NewProgram(listui.New(fetch, nil)).Run(); err != nil {
+	cfg := dock.Config{InnerSocket: *inner, OuterSocket: *outer, SessionName: dock.SessionName}
+	switchTo := func(ctx context.Context, s sessionlist.Session) error {
+		return switcher.Switch(ctx, dock.ExecRunner, cfg, s)
+	}
+	if _, err := tea.NewProgram(listui.New(fetch, switchTo)).Run(); err != nil {
 		return fmt.Errorf("一覧の画面を動かせなかった: %w", err)
 	}
 	return nil
@@ -106,7 +114,7 @@ func run() error {
 	}
 	cfg := dock.ConfigFromEnv(os.Getenv)
 	plan := dock.NewPlan(cfg, confPath,
-		[]string{self, "list", "--inner-socket", cfg.InnerSocket},
+		[]string{self, "list", "--inner-socket", cfg.InnerSocket, "--outer-socket", cfg.OuterSocket},
 		[]string{self, "attach", "--inner-socket", cfg.InnerSocket})
 	if err := dock.EnsureSession(context.Background(), dock.ExecRunner, plan); err != nil {
 		return err
