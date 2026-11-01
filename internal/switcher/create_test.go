@@ -42,9 +42,20 @@ func TestDecide(t *testing.T) {
 }
 
 func TestCreateArgs(t *testing.T) {
-	want := []string{"-L", "inner-x", "new-session", "-d", "-P", "-F", "#{session_id}", "-s", "my work"}
-	if got := CreateArgs("inner-x", "my work"); !reflect.DeepEqual(got, want) {
-		t.Errorf("CreateArgs() = %q, want %q", got, want)
+	// 末尾が \ の名前の往復は追わない（限界）。
+	tests := []struct{ name, wantName string }{
+		{"my work", "my work"},
+		{"work;", `work\;`},
+		{";", `\;`},
+		{"a;b", "a;b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			want := []string{"-L", "inner-x", "new-session", "-d", "-P", "-F", "#{session_id}", "-s", tt.wantName}
+			if got := CreateArgs("inner-x", tt.name); !reflect.DeepEqual(got, want) {
+				t.Errorf("CreateArgs(%q) = %q, want %q", tt.name, got, want)
+			}
+		})
 	}
 }
 
@@ -69,14 +80,15 @@ func TestOpen(t *testing.T) {
 		}
 	})
 
-	t.Run("普段のサーバが無ければ 0 件として作る", func(t *testing.T) {
+	t.Run("普段のサーバが無ければ new-session は打つが switch-client は打たない", func(t *testing.T) {
 		noServer := dock.Result{ExitCode: 1, Stderr: "no server running on /tmp/x\n"}
-		f := &fakeRunner{results: []dock.Result{noServer, {Stdout: []byte("$0\n")}, okTTY(), {}}}
+		f := &fakeRunner{results: []dock.Result{noServer, {Stdout: []byte("$0\n")}}}
 		if err := Open(ctx, f.run, cfg, "a"); err != nil {
 			t.Fatalf("Open() = %v", err)
 		}
-		if got := f.calls[1]; !reflect.DeepEqual(got, CreateArgs("inner-x", "a")) {
-			t.Errorf("calls[1] = %q, want new-session", got)
+		want := [][]string{listArgs, CreateArgs("inner-x", "a")}
+		if !reflect.DeepEqual(f.calls, want) {
+			t.Errorf("calls = %q, want %q", f.calls, want)
 		}
 	})
 

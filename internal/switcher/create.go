@@ -52,12 +52,19 @@ func Decide(name string, existing []sessionlist.Session) Decision {
 
 // CreateArgs は普段のサーバ（innerSocket）に name のセッションを detached で作る引数。
 // 名前は 1 要素のまま渡す。-c は付けず tmux の既定の作業ディレクトリに任せる。tmux は呼ばない。
+// tmux は argv 要素の末尾の ; をコマンド区切りと読むので、末尾が ; のときだけ最後の ; の前に \ を足す。
+// 末尾が \ の名前の往復は追わない。
 func CreateArgs(innerSocket, name string) []string {
+	if strings.HasSuffix(name, ";") {
+		name = strings.TrimSuffix(name, ";") + `\;`
+	}
 	return []string{"-L", innerSocket, "new-session", "-d", "-P", "-F", "#{session_id}", "-s", name}
 }
 
 // Open は確定した name を実行する。普段のサーバの一覧を取り直して Decide し、
 // 作るなら new-session の session_id へ、既存ならそのセッションへ Switch する。
+// 作成前の一覧が 0 件（右が待機中で内側クライアントが居ない）なら switch-client は必ず失敗するので
+// new-session だけ打ち、右の待機ループ（rightpane.Run）の attach に任せる。
 // 何もしないときは nil、弾いたときは理由のエラーを返す。
 func Open(ctx context.Context, run dock.Runner, cfg dock.Config, name string) error {
 	existing, err := sessionlist.Fetch(ctx, run, cfg.InnerSocket)
@@ -82,6 +89,9 @@ func Open(ctx context.Context, run dock.Runner, cfg dock.Config, name string) er
 	}
 	if res.ExitCode != 0 {
 		return fmt.Errorf("tmux %s が終了コード %d で失敗: %s", strings.Join(args, " "), res.ExitCode, res.Stderr)
+	}
+	if len(existing) == 0 {
+		return nil
 	}
 	id := strings.TrimSpace(string(res.Stdout))
 	if id == "" {
