@@ -85,7 +85,7 @@ func runAttach(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
-	return rightpane.Run(ctx, *inner, rightpane.Deps{
+	err = rightpane.Run(ctx, *inner, rightpane.Deps{
 		Fetch: func(ctx context.Context) ([]sessionlist.Session, error) {
 			return sessionlist.Fetch(ctx, dock.ExecRunner, *inner)
 		},
@@ -96,6 +96,10 @@ func runAttach(args []string) error {
 		Out:      os.Stdout,
 		Interval: attachInterval,
 	})
+	if errors.Is(err, context.Canceled) {
+		return nil // 止める合図による終了は正常終了
+	}
+	return err
 }
 
 // attachWaitDelay は子へ SIGTERM を送ってから、終わるのを待つ上限。
