@@ -3,6 +3,7 @@ package outerconf
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,5 +50,17 @@ func TestWriteToFailsWhenBaseDirIsFile(t *testing.T) {
 	}
 	if path, err := WriteTo(blocker); err == nil {
 		t.Errorf("WriteTo(%q) = %q, nil error; want error", blocker, path)
+	}
+}
+
+func TestContentHasKeyBindings(t *testing.T) {
+	for _, line := range []string{
+		"set -g prefix None",
+		"set -g prefix2 None",
+		"bind -n F12 select-pane -t :.+",
+	} {
+		if !strings.Contains(string(content), line+"\n") {
+			t.Errorf("同梱 conf = %q, want 行 %q を含む", content, line)
+		}
 	}
 }
