@@ -118,22 +118,15 @@ func (m Model) fetchCmd() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sessionsMsg:
-		if msg.err != nil {
-			m.loadNotice = fmt.Sprintf("一覧を取得できません: %v", msg.err)
-		} else {
-			m.loadNotice = ""
-			m.loaded = true
-			m.sessions, m.cursor = follow(m.sessions, m.cursor, msg.sessions)
-			if msg.viewingFetched {
-				m.viewingNotice = ""
-				m.viewingID, m.viewingKnown = msg.viewingID, msg.viewingKnown && msg.viewingErr == nil
-				if msg.viewingErr != nil {
-					m.viewingNotice = fmt.Sprintf("右が見ているセッションを取得できません: %v", msg.viewingErr)
-				}
-			}
-			m.activityBase, m.activityMarked = activityMarks(m.activityBase, msg.sessions, m.viewingID, m.viewingKnown)
+		next := m.applySessions(msg)
+		if !m.sameDisplay(next) {
+			// 表示に出る値が変わるときだけ入れ替える。
+			return next, m.nextTick()
 		}
-		return m, tea.Tick(m.interval, func(time.Time) tea.Msg { return tickMsg{} })
+		// 表示が同じでも基準は進める。進めないと右を離れた後に印が誤って付く。
+		m.activityBase = next.activityBase
+		m.loaded = next.loaded
+		return m, m.nextTick()
 	case tickMsg:
 		return m, m.fetchCmd()
 	case switchedMsg:
@@ -177,6 +170,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func (m Model) nextTick() tea.Cmd {
+	return tea.Tick(m.interval, func(time.Time) tea.Msg { return tickMsg{} })
+}
+
+// applySessions は取得結果を反映した Model を返す。
+func (m Model) applySessions(msg sessionsMsg) Model {
+	if msg.err != nil {
+		m.loadNotice = fmt.Sprintf("一覧を取得できません: %v", msg.err)
+		return m
+	}
+	m.loadNotice = ""
+	m.loaded = true
+	m.sessions, m.cursor = follow(m.sessions, m.cursor, msg.sessions)
+	if msg.viewingFetched {
+		m.viewingNotice = ""
+		m.viewingID, m.viewingKnown = msg.viewingID, msg.viewingKnown && msg.viewingErr == nil
+		if msg.viewingErr != nil {
+			m.viewingNotice = fmt.Sprintf("右が見ているセッションを取得できません: %v", msg.viewingErr)
+		}
+	}
+	m.activityBase, m.activityMarked = activityMarks(m.activityBase, msg.sessions, m.viewingID, m.viewingKnown)
+	return m
+}
+
+// display は描画に出る値から表示の状態を作る。
+func (m Model) display() displayState {
+	return newDisplayState(m.sessions, m.cursor, m.viewingID, m.viewingKnown, m.activityMarked, m.loadNotice)
+}
+
+// sameDisplay は next が m と同じ描画になるかを返す。viewingNotice は表示の状態に含まれないので別に比べる。
+func (m Model) sameDisplay(next Model) bool {
+	return m.viewingNotice == next.viewingNotice && m.display().equal(next.display())
 }
 
 func (m Model) closeInput() Model {
