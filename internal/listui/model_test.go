@@ -765,3 +765,98 @@ func TestModelSkipRedraw(t *testing.T) {
 		}
 	})
 }
+
+func TestModelRefetchAfterCreate(t *testing.T) {
+	update := func(m Model, msg tea.Msg) (Model, tea.Cmd) {
+		next, cmd := m.Update(msg)
+		return next.(Model), cmd
+	}
+	// create は n で名前を確定して createdMsg を Update に流した後の Model と Cmd を返す。
+	create := func(t *testing.T, m Model, createErr error) (Model, tea.Cmd) {
+		t.Helper()
+		m.create = recordCreate(new([]string), createErr)
+		m = typeText(m, "nnew")
+		m, cmd := pressKey(m, tea.KeyEnter)
+		if cmd == nil {
+			t.Fatal("Enter の Update = nil, want 作成の Cmd")
+		}
+		return update(m, cmd())
+	}
+	isTick := func(cmd tea.Cmd) bool {
+		if cmd == nil {
+			return false
+		}
+		_, ok := cmd().(tickMsg)
+		return ok
+	}
+
+	t.Run("作成が成功すると次の取り直しを待たずに作ったセッションが一覧に出る", func(t *testing.T) {
+		calls := 0
+		m := New(sequence(&calls, result{names: []string{"a"}}, result{names: []string{"a", "new"}}), nil, nil, nil)
+		m.interval = time.Hour
+		m, _ = update(m, m.Init()())
+		m, cmd := create(t, m, nil)
+		if cmd == nil {
+			t.Fatal("作成成功後の Cmd = nil, want 即時の取得")
+		}
+		m, _ = update(m, cmd())
+		if got, want := m.View().Content, ">   0 a\n    0 new"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("作成が成功した後も取り直しの鎖は 1 本のまま", func(t *testing.T) {
+		calls := 0
+		m := New(sequence(&calls, result{names: []string{"a"}}, result{names: []string{"a", "new"}}), nil, nil, nil)
+		m.interval = time.Millisecond
+		m, _ = update(m, m.Init()())
+		m, cmd := create(t, m, nil)
+		_, after := update(m, cmd())
+		if after != nil {
+			t.Errorf("即時の結果の後の Cmd = %T, want nil（次の tick を張らない）", after())
+		}
+	})
+
+	t.Run("作成より前に始まった定期の取得の結果が後から届いても作ったセッションは消えず、鎖は続く", func(t *testing.T) {
+		calls := 0
+		m := New(sequence(&calls, result{names: []string{"a"}}, result{names: []string{"a"}}, result{names: []string{"a", "new"}}), nil, nil, nil)
+		m.interval = time.Millisecond
+		m, _ = update(m, m.Init()())
+		_, tickCmd := update(m, tickMsg{})
+		stale := tickCmd() // 作成の前に始まった定期の取得（作ったセッションを含まない）
+		m, cmd := create(t, m, nil)
+		m, _ = update(m, cmd())
+		m, after := update(m, stale)
+		if got, want := m.View().Content, ">   0 a\n    0 new"; got != want {
+			t.Errorf("古い結果の後の View() = %q, want %q", got, want)
+		}
+		if !isTick(after) {
+			t.Error("古い定期の結果の後の Cmd は次の tick であるべき（鎖を止めない）")
+		}
+	})
+
+	t.Run("古い世代の即時の結果は表示に使わず、次の tick も張らない", func(t *testing.T) {
+		m := New(nil, nil, nil, nil)
+		m.interval = time.Millisecond
+		m.gen = 2
+		m, cmd := update(m, sessionsMsg{sessions: []sessionlist.Session{{ID: "$1", Name: "old"}}, gen: 1, immediate: true})
+		if cmd != nil {
+			t.Errorf("Cmd = %T, want nil", cmd())
+		}
+		if got := m.View().Content; strings.Contains(got, "old") {
+			t.Errorf("View() = %q, want 古い結果の old を含まない", got)
+		}
+	})
+
+	t.Run("作成が失敗したときは理由の 1 行を出し、取り直しの Cmd を返さない", func(t *testing.T) {
+		m := New(names("a"), nil, nil, nil)
+		m, _ = update(m, m.Init()())
+		m, cmd := create(t, m, errors.New("boom"))
+		if cmd != nil {
+			t.Errorf("Cmd = %T, want nil", cmd())
+		}
+		if got, want := m.View().Content, ">   0 a\n新規セッション名: new\n作成できません: boom"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+}

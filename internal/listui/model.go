@@ -46,6 +46,9 @@ type sessionsMsg struct {
 	viewingID      string
 	viewingKnown   bool
 	viewingErr     error
+	// gen は取得を始めた時点の Model の世代。immediate は作成の成功を受けて即時に始めた取得で、次の tick を張らない。
+	gen       uint64
+	immediate bool
 }
 
 // tickMsg は取り直しの時刻が来たことを表す。
@@ -83,6 +86,8 @@ type Model struct {
 	activityBase   map[string]int64
 	activityMarked map[string]bool
 	interval       time.Duration
+	// gen は取得の世代。作成の成功で進め、始めた時点の世代と違う結果は表示に使わない。
+	gen uint64
 	// inputting は名前の入力中。input は入力中の名前、inputError は作成に失敗したときの理由の 1 行。
 	// creating は作成関数の結果待ちで、その間の打鍵は名前に足さない。
 	inputting  bool
@@ -102,11 +107,20 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) fetchCmd() tea.Cmd {
-	fetch, viewing := m.fetch, m.viewing
+	return m.fetchWith(false)
+}
+
+// fetchNowCmd は作成の成功を受けた 1 回限りの取得で、結果を受けても次の tick を張らない。
+func (m Model) fetchNowCmd() tea.Cmd {
+	return m.fetchWith(true)
+}
+
+func (m Model) fetchWith(immediate bool) tea.Cmd {
+	fetch, viewing, gen := m.fetch, m.viewing, m.gen
 	return func() tea.Msg {
 		ctx := context.Background()
 		ss, err := fetch(ctx)
-		msg := sessionsMsg{sessions: ss, err: err}
+		msg := sessionsMsg{sessions: ss, err: err, gen: gen, immediate: immediate}
 		if err == nil && viewing != nil {
 			msg.viewingFetched = true
 			msg.viewingID, msg.viewingKnown, msg.viewingErr = viewing(ctx)
@@ -118,15 +132,24 @@ func (m Model) fetchCmd() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sessionsMsg:
+		// 即時の取得は鎖の外なので次の tick を張らない。定期の取得は結果を捨てるときも張る（張らないと鎖が止まる）。
+		tick := m.nextTick()
+		if msg.immediate {
+			tick = nil
+		}
+		if msg.gen != m.gen {
+			// 作成より前に始まった取得の結果は、作ったセッションを含まないので表示に使わない。
+			return m, tick
+		}
 		next := m.applySessions(msg)
 		if !m.sameDisplay(next) {
 			// 表示に出る値が変わるときだけ入れ替える。
-			return next, m.nextTick()
+			return next, tick
 		}
 		// 表示が同じでも基準は進める。進めないと右を離れた後に印が誤って付く。
 		m.activityBase = next.activityBase
 		m.loaded = next.loaded
-		return m, m.nextTick()
+		return m, tick
 	case tickMsg:
 		return m, m.fetchCmd()
 	case switchedMsg:
@@ -141,6 +164,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputError = fmt.Sprintf("作成できません: %v", msg.err)
 		} else {
 			m = m.closeInput()
+			m.gen++
+			return m, m.fetchNowCmd()
 		}
 	case tea.KeyPressMsg:
 		if m.inputting {

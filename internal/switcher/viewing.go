@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/ryokosuge/tmux-dock/internal/dock"
 	"github.com/ryokosuge/tmux-dock/internal/sessionlist"
@@ -59,6 +60,8 @@ func Viewing(clients []Client, paneTTY string) (sessionID string, ok bool) {
 type Viewer struct {
 	run dock.Runner
 	cfg dock.Config
+	// mu は tty の読み書きを守る。即時の取り直しと定期の取り直しが並走して Viewing を呼ぶことがある。
+	mu  sync.Mutex
 	tty string
 }
 
@@ -71,6 +74,8 @@ func NewViewer(run dock.Runner, cfg dock.Config) *Viewer {
 // まだ取れない・該当クライアントが無い）は ok=false でエラーにしない。
 // tty が取れるまでは呼ぶたびに外側へ取りに行き、取れた後は普段のサーバへの list-clients だけを打つ。
 func (v *Viewer) Viewing(ctx context.Context) (string, bool, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	if v.tty == "" {
 		args := PaneTTYArgs(v.cfg.OuterSocket, v.cfg.SessionName)
 		res, err := v.run(ctx, args)
