@@ -656,3 +656,112 @@ func TestModelMarksShareColumns(t *testing.T) {
 		}
 	})
 }
+
+func TestModelSkipRedraw(t *testing.T) {
+	base := func() sessionsMsg {
+		return sessionsMsg{
+			sessions: []sessionlist.Session{
+				{ID: "$1", Name: "a", Windows: 1, Activity: 10},
+				{ID: "$2", Name: "b", Windows: 1, Activity: 10},
+			},
+			viewingFetched: true, viewingID: "$1", viewingKnown: true,
+		}
+	}
+	update := func(m Model, msg tea.Msg) (Model, tea.Cmd) {
+		next, cmd := m.Update(msg)
+		return next.(Model), cmd
+	}
+	// isTick は cmd が次の取り直しの tick だけを返すことを確かめる。
+	isTick := func(t *testing.T, cmd tea.Cmd) {
+		t.Helper()
+		if cmd == nil {
+			t.Fatal("Cmd = nil, want 次の取り直しの tick")
+		}
+		m := New(nil, nil, nil, nil)
+		m.interval = time.Millisecond
+		_, tick := m.Update(sessionsMsg{})
+		if got, want := reflect.TypeOf(cmd()), reflect.TypeOf(tick()); got != want {
+			t.Errorf("Cmd() の型 = %v, want %v", got, want)
+		}
+	}
+	loaded := func(t *testing.T) Model {
+		t.Helper()
+		m := New(nil, nil, nil, nil)
+		m.interval = time.Millisecond
+		m, _ = update(m, base())
+		return m
+	}
+
+	t.Run("前回と同じ取得結果を渡すと Model も画面も変わらず Cmd は次の tick だけ", func(t *testing.T) {
+		m := loaded(t)
+		next, cmd := update(m, base())
+		if !reflect.DeepEqual(next, m) {
+			t.Errorf("Model = %+v, want %+v", next, m)
+		}
+		if got, want := next.View().Content, m.View().Content; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+		isTick(t, cmd)
+	})
+
+	diffs := map[string]func(*sessionsMsg){
+		"見ている印":       func(s *sessionsMsg) { s.viewingID = "$2" },
+		"window 数":    func(s *sessionsMsg) { s.sessions[1].Windows = 2 },
+		"activity の印": func(s *sessionsMsg) { s.sessions[1].Activity = 20 },
+	}
+	wants := map[string]string{
+		"見ている印":       " *  1 b",
+		"window 数":    "    2 b",
+		"activity の印": "  ! 1 b",
+	}
+	for name, change := range diffs {
+		t.Run(name+"だけが違う取得結果を渡すと Model が変わり画面にその違いが出る", func(t *testing.T) {
+			m := loaded(t)
+			msg := base()
+			change(&msg)
+			next, cmd := update(m, msg)
+			if reflect.DeepEqual(next, m) {
+				t.Error("Model が変わらなかった, want 変わる")
+			}
+			if got := next.View().Content; !strings.Contains(got, wants[name]) {
+				t.Errorf("View() = %q, want %q を含む", got, wants[name])
+			}
+			isTick(t, cmd)
+		})
+	}
+
+	t.Run("右が見ているセッションの activity だけが進んでも描き直さず、基準は進む", func(t *testing.T) {
+		m := loaded(t)
+		msg := base()
+		msg.sessions[0].Activity = 30
+		next, cmd := update(m, msg)
+		if got, want := next.View().Content, m.View().Content; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+		if !reflect.DeepEqual(next.sessions, m.sessions) || !reflect.DeepEqual(next.activityMarked, m.activityMarked) {
+			t.Errorf("表示に出る値が入れ替わった: sessions=%+v marked=%+v", next.sessions, next.activityMarked)
+		}
+		if got := next.activityBase["$1"]; got != 30 {
+			t.Errorf("activityBase[$1] = %d, want 30", got)
+		}
+		isTick(t, cmd)
+	})
+
+	t.Run("取り直しの失敗が続く間は理由の行が同じなら描き直さず、取れて理由が消えると描き直す", func(t *testing.T) {
+		m := loaded(t)
+		fail := sessionsMsg{err: errors.New("boom")}
+		failed, _ := update(m, fail)
+		if !strings.HasSuffix(failed.View().Content, "一覧を取得できません: boom") {
+			t.Fatalf("View() = %q, want 理由の行で終わる", failed.View().Content)
+		}
+		again, cmd := update(failed, fail)
+		if !reflect.DeepEqual(again, failed) {
+			t.Errorf("Model = %+v, want %+v", again, failed)
+		}
+		isTick(t, cmd)
+		recovered, _ := update(again, base())
+		if got, want := recovered.View().Content, m.View().Content; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+}
