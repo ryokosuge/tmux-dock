@@ -23,7 +23,7 @@ func (f *fakeRunner) run(_ context.Context, args []string) (dock.Result, error) 
 }
 
 func TestListArgs(t *testing.T) {
-	want := []string{"-L", "inner-x", "list-sessions", "-F", "#{session_id} #{session_name}"}
+	want := []string{"-L", "inner-x", "list-sessions", "-F", "#{session_id}\t#{session_windows}\t#{W:#{window_activity} }\t#{session_name}"}
 	if got := ListArgs("inner-x"); !reflect.DeepEqual(got, want) {
 		t.Errorf("ListArgs() = %q, want %q", got, want)
 	}
@@ -43,13 +43,24 @@ func TestFetch(t *testing.T) {
 		}
 	})
 
-	t.Run("終了コード 0 の出力をセッション名の並びにする", func(t *testing.T) {
-		f := &fakeRunner{res: dock.Result{Stdout: []byte("$0 a\n$1 b\n")}}
+	t.Run("終了コード 0 の出力をセッションの並びにする", func(t *testing.T) {
+		f := &fakeRunner{res: dock.Result{Stdout: []byte("$0\t2\t10 20 \ta\n$1\t1\t30 \tb\n")}}
 		got, err := Fetch(ctx, f.run, "s")
 		if err != nil {
 			t.Fatalf("Fetch() = %v", err)
 		}
-		if want := []Session{{ID: "$0", Name: "a"}, {ID: "$1", Name: "b"}}; !reflect.DeepEqual(got, want) {
+		if want := []Session{{ID: "$0", Name: "a", Windows: 2, Activity: 20}, {ID: "$1", Name: "b", Windows: 1, Activity: 30}}; !reflect.DeepEqual(got, want) {
+			t.Errorf("Fetch() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("解析できない行があれば行番号を含むエラーと他の行を返す", func(t *testing.T) {
+		f := &fakeRunner{res: dock.Result{Stdout: []byte("$0\t1\t5 \ta\nbroken\n")}}
+		got, err := Fetch(ctx, f.run, "s")
+		if err == nil || !strings.Contains(err.Error(), "2 行目") {
+			t.Fatalf("Fetch() err = %v, want 2 行目を含むエラー", err)
+		}
+		if want := []Session{{ID: "$0", Name: "a", Windows: 1, Activity: 5}}; !reflect.DeepEqual(got, want) {
 			t.Errorf("Fetch() = %v, want %v", got, want)
 		}
 	})

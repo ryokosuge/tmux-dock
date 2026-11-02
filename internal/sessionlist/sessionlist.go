@@ -1,34 +1,71 @@
 package sessionlist
 
-import "strings"
+import (
+	"errors"
+	"fmt"
+	"strconv"
+	"strings"
+)
 
-// Format は list-sessions に渡す -F の書式。1 行 1 セッション、先頭が session_id、空白 1 つを挟んで残り全部がセッション名。
-// id は $ と数字だけで空白を含まないので、先頭の 1 つだけで分ければ名前に空白や区切りが入っても割れない。
-const Format = "#{session_id} #{session_name}"
+// fieldCount は Format の項目数。
+const fieldCount = 4
+
+// Format は list-sessions に渡す -F の書式。生のタブ（0x09）区切りで
+// session_id / session_windows / 各 window の window_activity（window ごとに末尾の空白付き）/ session_name の順。
+// 名前は何でも入りうるので必ず最後に置き、SplitN で割る。先頭や途中に置くと名前の区切りで割れる。
+// tmux は -F の中の \t を解釈しないので、区切りは生のタブで書く。
+const Format = "#{session_id}\t#{session_windows}\t#{W:#{window_activity} }\t#{session_name}"
 
 // emptyMessage は 0 件のときに左ペインへ出す行。
 const emptyMessage = "セッションがありません"
 
 // Session は普段の tmux サーバにある 1 つのセッション。
+// Activity は各 window の window_activity（UNIX 時刻の秒）の最大で、window が無ければ 0。
 type Session struct {
-	ID   string
-	Name string
+	ID       string
+	Name     string
+	Windows  int
+	Activity int64
 }
 
 // Parse は list-sessions -F Format の出力（改行区切り）を、tmux の出力順のままの並びにする。
-// 空の出力は 0 件。
-func Parse(out []byte) []Session {
+// 空の出力は 0 件。解析できない行は飛ばし、行番号と理由を含むエラーにまとめて返す（他の行の結果は残る）。
+func Parse(out []byte) ([]Session, error) {
 	text := strings.TrimSuffix(string(out), "\n")
 	if text == "" {
-		return nil
+		return nil, nil
 	}
-	lines := strings.Split(text, "\n")
-	ss := make([]Session, len(lines))
-	for i, l := range lines {
-		id, name, _ := strings.Cut(l, " ")
-		ss[i] = Session{ID: id, Name: name}
+	var ss []Session
+	var errs []error
+	for i, l := range strings.Split(text, "\n") {
+		s, err := parseLine(l)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%d 行目 %q: %w", i+1, l, err))
+			continue
+		}
+		ss = append(ss, s)
 	}
-	return ss
+	return ss, errors.Join(errs...)
+}
+
+func parseLine(line string) (Session, error) {
+	f := strings.SplitN(line, "\t", fieldCount)
+	if len(f) != fieldCount {
+		return Session{}, fmt.Errorf("タブ区切りで %d 項目に割れない（%d 項目）", fieldCount, len(f))
+	}
+	windows, err := strconv.Atoi(f[1])
+	if err != nil {
+		return Session{}, fmt.Errorf("window 数 %q を数値に読めない", f[1])
+	}
+	var activity int64
+	for _, a := range strings.Fields(f[2]) {
+		v, err := strconv.ParseInt(a, 10, 64)
+		if err != nil {
+			return Session{}, fmt.Errorf("window_activity %q を数値に読めない", a)
+		}
+		activity = max(activity, v)
+	}
+	return Session{ID: f[0], Name: f[3], Windows: windows, Activity: activity}, nil
 }
 
 // Lines は左ペインに出す行を返す。0 件なら案内の 1 行。tmux は呼ばない。
