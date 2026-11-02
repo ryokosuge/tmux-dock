@@ -32,6 +32,13 @@ func TestFollow(t *testing.T) {
 			wantCursor: 1,
 		},
 		{
+			name:       "改名されて並びの位置が動いたセッションにカーソルがあると、カーソルは改名後のその行へ移る",
+			cursor:     0,
+			fetched:    []sessionlist.Session{{ID: "$2", Name: "b"}, {ID: "$3", Name: "c"}, {ID: "$1", Name: "renamed"}},
+			wantList:   []sessionlist.Session{{ID: "$2", Name: "b"}, {ID: "$3", Name: "c"}, {ID: "$1", Name: "renamed"}},
+			wantCursor: 2,
+		},
+		{
 			name:       "カーソルのセッションが消えて末尾を越えるときは最後の行に収まる",
 			cursor:     2,
 			fetched:    []sessionlist.Session{{ID: "$1", Name: "a"}, {ID: "$2", Name: "b"}},
