@@ -14,6 +14,9 @@ import (
 
 type fetchFunc func(ctx context.Context) ([]sessionlist.Session, error)
 
+// viewingFunc は右が見ているセッションの id を返す。分からないとき（右が待機の表示など）は ok=false を返す。
+type viewingFunc func(ctx context.Context) (id string, ok bool, err error)
+
 // switchFunc は Enter で選んだセッションに右ペインを切り替える。
 type switchFunc func(ctx context.Context, s sessionlist.Session) error
 
@@ -21,9 +24,12 @@ type switchFunc func(ctx context.Context, s sessionlist.Session) error
 type createFunc func(ctx context.Context, name string) error
 
 const (
-	cursorMark   = "> "
-	noCursorMark = "  "
-	inputPrompt  = "新規セッション名: "
+	cursorMark   = ">"
+	noCursorMark = " "
+	// viewingMark は右が見ているセッションの行の 2 桁目に付く。1 桁目はカーソルの印。
+	viewingMark   = "*"
+	noViewingMark = " "
+	inputPrompt   = "新規セッション名: "
 
 	// refreshInterval は一覧を取り直す間隔の既定。
 	refreshInterval = time.Second
@@ -32,6 +38,11 @@ const (
 type sessionsMsg struct {
 	sessions []sessionlist.Session
 	err      error
+	// viewingFetched は一覧の取得に成功して見ている id も取りにいったこと。viewingID は ok のときだけ入る。
+	viewingFetched bool
+	viewingID      string
+	viewingKnown   bool
+	viewingErr     error
 }
 
 // tickMsg は取り直しの時刻が来たことを表す。
@@ -53,6 +64,7 @@ type Model struct {
 	fetch    fetchFunc
 	switchTo switchFunc
 	create   createFunc
+	viewing  viewingFunc
 	sessions []sessionlist.Session
 	cursor   int
 	// notice は一覧の下に出す、切り替えの失敗の 1 行。
@@ -60,7 +72,11 @@ type Model struct {
 	// loadNotice は取得の失敗の 1 行。一覧を一度も取れていない間は一覧の代わりに、取れた後は一覧の下に出す。
 	loadNotice string
 	loaded     bool
-	interval   time.Duration
+	// viewingID は右が見ているセッションの id で、viewingKnown が false のときは分からない。viewingNotice は取得の失敗の 1 行。
+	viewingID     string
+	viewingKnown  bool
+	viewingNotice string
+	interval      time.Duration
 	// inputting は名前の入力中。input は入力中の名前、inputError は作成に失敗したときの理由の 1 行。
 	// creating は作成関数の結果待ちで、その間の打鍵は名前に足さない。
 	inputting  bool
@@ -70,8 +86,9 @@ type Model struct {
 }
 
 // New の switchTo は nil でもよく、そのとき Enter は何もしない。create も nil でもよく、そのとき n は何もしない。
-func New(fetch fetchFunc, switchTo switchFunc, create createFunc) Model {
-	return Model{fetch: fetch, switchTo: switchTo, create: create, interval: refreshInterval}
+// viewing は取り直しのたびに一覧の取得の後に続けて呼ぶ。nil のときは見ている印を付けない。
+func New(fetch fetchFunc, switchTo switchFunc, create createFunc, viewing viewingFunc) Model {
+	return Model{fetch: fetch, switchTo: switchTo, create: create, viewing: viewing, interval: refreshInterval}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -79,10 +96,16 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) fetchCmd() tea.Cmd {
-	fetch := m.fetch
+	fetch, viewing := m.fetch, m.viewing
 	return func() tea.Msg {
-		ss, err := fetch(context.Background())
-		return sessionsMsg{sessions: ss, err: err}
+		ctx := context.Background()
+		ss, err := fetch(ctx)
+		msg := sessionsMsg{sessions: ss, err: err}
+		if err == nil && viewing != nil {
+			msg.viewingFetched = true
+			msg.viewingID, msg.viewingKnown, msg.viewingErr = viewing(ctx)
+		}
+		return msg
 	}
 }
 
@@ -95,6 +118,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.loadNotice = ""
 			m.loaded = true
 			m.sessions, m.cursor = follow(m.sessions, m.cursor, msg.sessions)
+			if msg.viewingFetched {
+				m.viewingNotice = ""
+				m.viewingID, m.viewingKnown = msg.viewingID, msg.viewingKnown && msg.viewingErr == nil
+				if msg.viewingErr != nil {
+					m.viewingNotice = fmt.Sprintf("右が見ているセッションを取得できません: %v", msg.viewingErr)
+				}
+			}
 		}
 		return m, tea.Tick(m.interval, func(time.Time) tea.Msg { return tickMsg{} })
 	case tickMsg:
@@ -192,7 +222,11 @@ func (m Model) View() tea.View {
 				if i == m.cursor {
 					mark = cursorMark
 				}
-				lines[i] = mark + lines[i]
+				view := noViewingMark
+				if m.viewingKnown && m.sessions[i].ID == m.viewingID {
+					view = viewingMark
+				}
+				lines[i] = mark + view + lines[i]
 			}
 		}
 		if m.notice != "" {
@@ -200,6 +234,9 @@ func (m Model) View() tea.View {
 		}
 		if m.loadNotice != "" {
 			lines = append(lines, m.loadNotice)
+		}
+		if m.viewingNotice != "" {
+			lines = append(lines, m.viewingNotice)
 		}
 	}
 	if m.inputting {
