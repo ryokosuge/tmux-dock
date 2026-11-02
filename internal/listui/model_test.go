@@ -21,7 +21,7 @@ func load(t *testing.T, fetch fetchFunc) (Model, tea.Cmd) {
 
 func loadWith(t *testing.T, fetch fetchFunc, switchTo switchFunc) (Model, tea.Cmd) {
 	t.Helper()
-	m := New(fetch, switchTo, nil)
+	m := New(fetch, switchTo, nil, nil)
 	cmd := m.Init()
 	if cmd == nil {
 		t.Fatal("Init() = nil, want 取得の Cmd")
@@ -209,7 +209,7 @@ func TestModelSwitch(t *testing.T) {
 
 func loadWithCreate(t *testing.T, fetch fetchFunc, create createFunc) Model {
 	t.Helper()
-	m := New(fetch, nil, create)
+	m := New(fetch, nil, create, nil)
 	next, _ := m.Update(m.Init()())
 	return next.(Model)
 }
@@ -380,7 +380,7 @@ func sequence(calls *int, responses ...result) fetchFunc {
 func TestModelRefresh(t *testing.T) {
 	t.Run("取得結果を受けた Update は次の tick を張る Cmd を返し、取得はまだ呼ばない", func(t *testing.T) {
 		calls := 0
-		m := New(sequence(&calls, result{names: []string{"a"}}), nil, nil)
+		m := New(sequence(&calls, result{names: []string{"a"}}), nil, nil, nil)
 		m.interval = time.Nanosecond
 		_, cmd := m.Update(m.Init()())
 		if cmd == nil {
@@ -396,7 +396,7 @@ func TestModelRefresh(t *testing.T) {
 
 	t.Run("tick のメッセージで取得が呼ばれ、その結果で一覧が差し替わる", func(t *testing.T) {
 		calls := 0
-		m := New(sequence(&calls, result{names: []string{"a", "b"}}, result{names: []string{"a", "c", "d"}}), nil, nil)
+		m := New(sequence(&calls, result{names: []string{"a", "b"}}, result{names: []string{"a", "c", "d"}}), nil, nil, nil)
 		next, _ := m.Update(m.Init()())
 		next, cmd := next.Update(tickMsg{})
 		if cmd == nil {
@@ -418,7 +418,7 @@ func TestModelRefresh(t *testing.T) {
 		fetch := func(ss ...sessionlist.Session) fetchFunc {
 			return func(context.Context) ([]sessionlist.Session, error) { return ss, nil }
 		}
-		m := New(fetch(sessionlist.Session{ID: "$1", Name: "a"}, sessionlist.Session{ID: "$2", Name: "b"}), nil, nil)
+		m := New(fetch(sessionlist.Session{ID: "$1", Name: "a"}, sessionlist.Session{ID: "$2", Name: "b"}), nil, nil, nil)
 		next, _ := m.Update(m.Init()())
 		m = press(next.(Model), "down")
 		m.fetch = fetch(sessionlist.Session{ID: "$0", Name: "z"}, sessionlist.Session{ID: "$2", Name: "b2"})
@@ -434,7 +434,7 @@ func TestModelRefresh(t *testing.T) {
 			result{names: []string{"a", "b"}},
 			result{err: errors.New("boom")},
 			result{names: []string{"a", "b", "c"}},
-		), nil, nil)
+		), nil, nil, nil)
 		next, _ := m.Update(m.Init()())
 		next, cmd := next.Update(tickMsg{})
 		next, cmd = next.Update(cmd())
@@ -453,13 +453,121 @@ func TestModelRefresh(t *testing.T) {
 
 	t.Run("名前の入力中に取り直しが来ても入力中の名前は変わらない", func(t *testing.T) {
 		calls := 0
-		m := New(sequence(&calls, result{names: []string{"a", "b"}}, result{names: []string{"a", "b", "c"}}), nil, recordCreate(new([]string), nil))
+		m := New(sequence(&calls, result{names: []string{"a", "b"}}, result{names: []string{"a", "b", "c"}}), nil, recordCreate(new([]string), nil), nil)
 		next, _ := m.Update(m.Init()())
 		m = typeText(next.(Model), "nwo")
 		next, cmd := m.Update(tickMsg{})
 		next, _ = next.Update(cmd())
 		if got, want := next.(Model).View().Content, "> a\n  b\n  c\n新規セッション名: wo"; got != want {
 			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+}
+
+type viewingResult struct {
+	id    string
+	known bool
+	err   error
+}
+
+// viewingSeq は呼ばれるたびに responses を先頭から 1 つずつ返す見ている id の取得関数。
+func viewingSeq(responses ...viewingResult) viewingFunc {
+	i := 0
+	return func(context.Context) (string, bool, error) {
+		r := responses[i]
+		i++
+		return r.id, r.known, r.err
+	}
+}
+
+func sessionsWithID(ids ...string) fetchFunc {
+	return func(context.Context) ([]sessionlist.Session, error) {
+		ss := make([]sessionlist.Session, len(ids))
+		for i, id := range ids {
+			ss[i] = sessionlist.Session{ID: id, Name: "s" + id}
+		}
+		return ss, nil
+	}
+}
+
+// refresh は取り直しの tick を 1 回進めた Model を返す。
+func refresh(t *testing.T, m Model) Model {
+	t.Helper()
+	_, cmd := m.Update(tickMsg{})
+	next, _ := m.Update(cmd())
+	return next.(Model)
+}
+
+func TestModelViewing(t *testing.T) {
+	t.Run("見ている id の行にだけ 2 桁目の印が付き、カーソルの印とは別の桁に出る", func(t *testing.T) {
+		m := New(sessionsWithID("$1", "$2", "$3"), nil, nil, viewingSeq(viewingResult{id: "$2", known: true}))
+		next, _ := m.Update(m.Init()())
+		if got, want := next.(Model).View().Content, "> s$1\n *s$2\n  s$3"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("カーソルの行が見ている行のときは 1 桁目と 2 桁目の両方に印が付く", func(t *testing.T) {
+		m := New(sessionsWithID("$1", "$2"), nil, nil, viewingSeq(viewingResult{id: "$1", known: true}))
+		next, _ := m.Update(m.Init()())
+		if got, want := next.(Model).View().Content, ">*s$1\n  s$2"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("分からないとき、または見ている id が一覧に無いときはどの行にも印が付かない", func(t *testing.T) {
+		for name, r := range map[string]viewingResult{
+			"分からない":    {known: false},
+			"一覧に無い id": {id: "$9", known: true},
+		} {
+			m := New(sessionsWithID("$1", "$2"), nil, nil, viewingSeq(r))
+			next, _ := m.Update(m.Init()())
+			if got, want := next.(Model).View().Content, "> s$1\n  s$2"; got != want {
+				t.Errorf("%s のとき View() = %q, want %q", name, got, want)
+			}
+		}
+	})
+
+	t.Run("失敗の行と 0 件の案内の行には印が付かない", func(t *testing.T) {
+		failing := func(context.Context) ([]sessionlist.Session, error) { return nil, errors.New("boom") }
+		m := New(failing, nil, nil, viewingSeq(viewingResult{id: "", known: true}))
+		next, _ := m.Update(m.Init()())
+		if got, want := next.(Model).View().Content, "一覧を取得できません: boom"; got != want {
+			t.Errorf("失敗のとき View() = %q, want %q", got, want)
+		}
+		m = New(names(), nil, nil, viewingSeq(viewingResult{id: "", known: true}))
+		next, _ = m.Update(m.Init()())
+		if got, want := next.(Model).View().Content, strings.Join(sessionlist.Lines(nil), "\n"); got != want {
+			t.Errorf("0 件のとき View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("取り直しのたびに見ている id も取り直され、印が移る", func(t *testing.T) {
+		m := New(sessionsWithID("$1", "$2"), nil, nil, viewingSeq(
+			viewingResult{id: "$1", known: true},
+			viewingResult{id: "$2", known: true},
+		))
+		next, _ := m.Update(m.Init()())
+		m = refresh(t, next.(Model))
+		if got, want := m.View().Content, "> s$1\n *s$2"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("見ている id の取得が失敗しても一覧は残って理由の 1 行が出て、次に取れたらその行が消える", func(t *testing.T) {
+		m := New(sessionsWithID("$1", "$2"), nil, nil, viewingSeq(
+			viewingResult{id: "$1", known: true},
+			viewingResult{err: errors.New("boom")},
+			viewingResult{id: "$2", known: true},
+		))
+		next, _ := m.Update(m.Init()())
+		m = refresh(t, next.(Model))
+		if got, want := m.View().Content, "> s$1\n  s$2\n右が見ているセッションを取得できません: boom"; got != want {
+			t.Errorf("失敗後の View() = %q, want %q", got, want)
+		}
+		m = refresh(t, m)
+		if got, want := m.View().Content, "> s$1\n *s$2"; got != want {
+			t.Errorf("次に取れた後の View() = %q, want %q", got, want)
 		}
 	})
 }
