@@ -45,6 +45,10 @@ func main() {
 	}
 }
 
+// listFPS は一覧の描画の上限。bubbletea の既定（60）だと変化が無くても毎秒 60 回起床して描画を比べるので、
+// 待機中の CPU を抑えるために下げる。キー入力のエコーは最大 1/listFPS 秒遅れる。
+const listFPS = 5
+
 // runList は左ペインで動く一覧の画面。--inner-socket / --outer-socket が無ければ
 // TMUX_DOCK_INNER_SOCKET / TMUX_DOCK_OUTER_SOCKET（未設定なら既定）を使う。
 func runList(args []string) error {
@@ -66,7 +70,7 @@ func runList(args []string) error {
 		return switcher.Open(ctx, dock.ExecRunner, cfg, name)
 	}
 	viewing := switcher.NewViewer(dock.ExecRunner, cfg).Viewing
-	if _, err := tea.NewProgram(listui.New(fetch, switchTo, create, viewing)).Run(); err != nil {
+	if _, err := tea.NewProgram(listui.New(fetch, switchTo, create, viewing), tea.WithFPS(listFPS)).Run(); err != nil {
 		return fmt.Errorf("一覧の画面を動かせなかった: %w", err)
 	}
 	return nil
