@@ -68,14 +68,17 @@ func parseLine(line string) (Session, error) {
 	return Session{ID: f[0], Name: f[3], Windows: windows, Activity: activity}, nil
 }
 
-// Lines は左ペインに出す行を返す。0 件なら案内の 1 行。tmux は呼ばない。
+// windowsWidth は行の window 数の桁数。名前の前に固定の桁で置き、名前の長さや空白に左右されないようにする。
+const windowsWidth = 2
+
+// Lines は左ペインに出す行（window 数と名前）を返す。0 件なら案内の 1 行。tmux は呼ばない。
 func Lines(ss []Session) []string {
 	if len(ss) == 0 {
 		return []string{emptyMessage}
 	}
 	lines := make([]string, len(ss))
 	for i, s := range ss {
-		lines[i] = s.Name
+		lines[i] = fmt.Sprintf("%*d %s", windowsWidth, s.Windows, s.Name)
 	}
 	return lines
 }

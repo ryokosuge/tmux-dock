@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -244,9 +245,12 @@ func waitLeftPane(t *testing.T, outer string, ok func(string) bool) string {
 	}
 }
 
+// rowPrefix は行頭のカーソル・見ている・activity の印と window 数。
+var rowPrefix = regexp.MustCompile(`^[>*! ]*[0-9]+ `)
+
 func hasLine(s, line string) bool {
 	for _, l := range strings.Split(s, "\n") {
-		if strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), ">")) == line {
+		if rowPrefix.ReplaceAllString(l, "") == line {
 			return true
 		}
 	}

@@ -27,11 +27,13 @@ func TestLines(t *testing.T) {
 		out  string
 		want []string
 	}{
-		{"a, b, c の 3 行がこの順で並ぶ", row("$0", 1, "1 ", "a") + row("$1", 1, "1 ", "b") + row("$2", 1, "1 ", "c"), []string{"a", "b", "c"}},
+		{"a, b, c の 3 行がこの順で並ぶ", row("$0", 1, "1 ", "a") + row("$1", 1, "1 ", "b") + row("$2", 1, "1 ", "c"), []string{" 1 a", " 1 b", " 1 c"}},
 		{"空の出力は「セッションがありません」の 1 行", "", []string{"セッションがありません"}},
-		{"空白を含む名前は 1 つの名前", row("$0", 1, "1 ", "my work") + row("$1", 1, "1 ", "b"), []string{"my work", "b"}},
-		{": を含む名前は 1 つの名前", row("$0", 1, "1 ", "a:b") + row("$1", 1, "1 ", "c"), []string{"a:b", "c"}},
-		{"末尾の改行が無くても同じ行数", strings.TrimSuffix(row("$0", 1, "1 ", "a")+row("$1", 1, "1 ", "b"), "\n"), []string{"a", "b"}},
+		{"空白を含む名前は 1 つの名前", row("$0", 1, "1 ", "my work") + row("$1", 1, "1 ", "b"), []string{" 1 my work", " 1 b"}},
+		{": を含む名前は 1 つの名前", row("$0", 1, "1 ", "a:b") + row("$1", 1, "1 ", "c"), []string{" 1 a:b", " 1 c"}},
+		{"末尾の改行が無くても同じ行数", strings.TrimSuffix(row("$0", 1, "1 ", "a")+row("$1", 1, "1 ", "b"), "\n"), []string{" 1 a", " 1 b"}},
+		{"window 数は 2 桁の幅に右寄せで名前の前に出る", row("$0", 3, "1 ", "a") + row("$1", 12, "1 ", "b"), []string{" 3 a", "12 b"}},
+		{"名前にタブや空白があっても window 数が崩れない", row("$0", 3, "1 ", "a  b\t9"), []string{" 3 a  b\t9"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

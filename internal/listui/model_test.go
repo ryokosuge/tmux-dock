@@ -35,7 +35,7 @@ func TestModel(t *testing.T) {
 		m, _ := load(t, func(context.Context) ([]sessionlist.Session, error) {
 			return []sessionlist.Session{{Name: "a"}, {Name: "b"}}, nil
 		})
-		if got, want := m.View().Content, "> a\n  b"; got != want {
+		if got, want := m.View().Content, ">   0 a\n    0 b"; got != want {
 			t.Errorf("View() = %q, want %q", got, want)
 		}
 	})
@@ -116,10 +116,10 @@ func TestModelCursor(t *testing.T) {
 			keys []string
 			want string
 		}{
-			{[]string{"down"}, "  a\n> b\n  c"},
-			{[]string{"j", "j"}, "  a\n  b\n> c"},
-			{[]string{"down", "down", "up"}, "  a\n> b\n  c"},
-			{[]string{"j", "j", "k"}, "  a\n> b\n  c"},
+			{[]string{"down"}, "    0 a\n>   0 b\n    0 c"},
+			{[]string{"j", "j"}, "    0 a\n    0 b\n>   0 c"},
+			{[]string{"down", "down", "up"}, "    0 a\n>   0 b\n    0 c"},
+			{[]string{"j", "j", "k"}, "    0 a\n>   0 b\n    0 c"},
 		}
 		for _, tt := range tests {
 			if got := press(m, tt.keys...).View().Content; got != tt.want {
@@ -130,10 +130,10 @@ func TestModelCursor(t *testing.T) {
 
 	t.Run("末尾でさらに下、先頭でさらに上に動かしても範囲内に留まる", func(t *testing.T) {
 		m, _ := load(t, names("a", "b"))
-		if got, want := press(m, "down", "down", "down").View().Content, "  a\n> b"; got != want {
+		if got, want := press(m, "down", "down", "down").View().Content, "    0 a\n>   0 b"; got != want {
 			t.Errorf("末尾で ↓ した後の View() = %q, want %q", got, want)
 		}
-		if got, want := press(m, "up", "up").View().Content, "> a\n  b"; got != want {
+		if got, want := press(m, "up", "up").View().Content, ">   0 a\n    0 b"; got != want {
 			t.Errorf("先頭で ↑ した後の View() = %q, want %q", got, want)
 		}
 	})
@@ -198,10 +198,10 @@ func TestModelSwitch(t *testing.T) {
 			}
 		}
 		m = next.(Model)
-		if got, want := m.View().Content, "  a\n> b\nb に切り替えられません: boom"; got != want {
+		if got, want := m.View().Content, "    0 a\n>   0 b\nb に切り替えられません: boom"; got != want {
 			t.Errorf("失敗後の View() = %q, want %q", got, want)
 		}
-		if got, want := press(m, "up").View().Content, "> a\n  b\nb に切り替えられません: boom"; got != want {
+		if got, want := press(m, "up").View().Content, ">   0 a\n    0 b\nb に切り替えられません: boom"; got != want {
 			t.Errorf("失敗後に ↑ した View() = %q, want %q", got, want)
 		}
 	})
@@ -240,15 +240,15 @@ func TestModelCreateInput(t *testing.T) {
 		var created []string
 		m := loadWithCreate(t, names("a", "b"), recordCreate(&created, nil))
 		m = typeText(m, "n")
-		if got, want := m.View().Content, "> a\n  b\n新規セッション名: "; got != want {
+		if got, want := m.View().Content, ">   0 a\n    0 b\n新規セッション名: "; got != want {
 			t.Errorf("n の後の View() = %q, want %q", got, want)
 		}
 		m = typeText(m, "ab日本")
-		if got, want := m.View().Content, "> a\n  b\n新規セッション名: ab日本"; got != want {
+		if got, want := m.View().Content, ">   0 a\n    0 b\n新規セッション名: ab日本"; got != want {
 			t.Errorf("打鍵の後の View() = %q, want %q", got, want)
 		}
 		m, _ = pressKey(m, tea.KeyBackspace)
-		if got, want := m.View().Content, "> a\n  b\n新規セッション名: ab日"; got != want {
+		if got, want := m.View().Content, ">   0 a\n    0 b\n新規セッション名: ab日"; got != want {
 			t.Errorf("Backspace の後の View() = %q, want %q", got, want)
 		}
 	})
@@ -256,7 +256,7 @@ func TestModelCreateInput(t *testing.T) {
 	t.Run("入力中に j / k / n を打つとカーソルは動かず名前に足される", func(t *testing.T) {
 		m := loadWithCreate(t, names("a", "b"), recordCreate(new([]string), nil))
 		m = typeText(m, "njkn")
-		if got, want := m.View().Content, "> a\n  b\n新規セッション名: jkn"; got != want {
+		if got, want := m.View().Content, ">   0 a\n    0 b\n新規セッション名: jkn"; got != want {
 			t.Errorf("View() = %q, want %q", got, want)
 		}
 	})
@@ -267,7 +267,7 @@ func TestModelCreateInput(t *testing.T) {
 		m = press(m, "down")
 		m = typeText(m, "nxy")
 		m, _ = pressKey(m, tea.KeyEscape)
-		if got, want := m.View().Content, "  a\n> b"; got != want {
+		if got, want := m.View().Content, "    0 a\n>   0 b"; got != want {
 			t.Errorf("View() = %q, want %q", got, want)
 		}
 		if len(created) != 0 {
@@ -285,7 +285,7 @@ func TestModelCreateInput(t *testing.T) {
 			if cmd != nil {
 				cmd()
 			}
-			if got, want := m.View().Content, "  a\n> b"; got != want {
+			if got, want := m.View().Content, "    0 a\n>   0 b"; got != want {
 				t.Errorf("%q の後の View() = %q, want %q", text, got, want)
 			}
 			if len(created) != 0 {
@@ -310,7 +310,7 @@ func TestModelCreateInput(t *testing.T) {
 		if want := []string{"work"}; !reflect.DeepEqual(created, want) {
 			t.Errorf("作成関数に渡った名前 = %v, want %v", created, want)
 		}
-		if got, want := next.(Model).View().Content, "  a\n> b"; got != want {
+		if got, want := next.(Model).View().Content, "    0 a\n>   0 b"; got != want {
 			t.Errorf("成功後の View() = %q, want %q", got, want)
 		}
 	})
@@ -322,11 +322,11 @@ func TestModelCreateInput(t *testing.T) {
 		m, cmd := pressKey(m, tea.KeyEnter)
 		next, _ := m.Update(cmd())
 		m = next.(Model)
-		if got, want := m.View().Content, "> a\n  b\n新規セッション名: work\n作成できません: boom"; got != want {
+		if got, want := m.View().Content, ">   0 a\n    0 b\n新規セッション名: work\n作成できません: boom"; got != want {
 			t.Errorf("失敗後の View() = %q, want %q", got, want)
 		}
 		m = typeText(m, "2")
-		if got, want := m.View().Content, "> a\n  b\n新規セッション名: work2\n作成できません: boom"; got != want {
+		if got, want := m.View().Content, ">   0 a\n    0 b\n新規セッション名: work2\n作成できません: boom"; got != want {
 			t.Errorf("続けて入力した後の View() = %q, want %q", got, want)
 		}
 	})
@@ -336,7 +336,7 @@ func TestModelCreateInput(t *testing.T) {
 		m = typeText(m, "nw")
 		m, _ = pressKey(m, tea.KeyEnter)
 		m = typeText(m, "x")
-		if got, want := m.View().Content, "> a\n新規セッション名: w"; got != want {
+		if got, want := m.View().Content, ">   0 a\n新規セッション名: w"; got != want {
 			t.Errorf("View() = %q, want %q", got, want)
 		}
 	})
@@ -353,7 +353,7 @@ func TestModelCreateInput(t *testing.T) {
 
 	t.Run("作成関数が nil のとき n を押しても入力は始まらない", func(t *testing.T) {
 		m := loadWithCreate(t, names("a", "b"), nil)
-		if got, want := typeText(m, "n").View().Content, "> a\n  b"; got != want {
+		if got, want := typeText(m, "n").View().Content, ">   0 a\n    0 b"; got != want {
 			t.Errorf("View() = %q, want %q", got, want)
 		}
 	})
@@ -409,7 +409,7 @@ func TestModelRefresh(t *testing.T) {
 		if calls != 2 {
 			t.Errorf("取得回数 = %d, want 2", calls)
 		}
-		if got, want := next.(Model).View().Content, "> a\n  c\n  d"; got != want {
+		if got, want := next.(Model).View().Content, ">   0 a\n    0 c\n    0 d"; got != want {
 			t.Errorf("View() = %q, want %q", got, want)
 		}
 	})
@@ -423,7 +423,7 @@ func TestModelRefresh(t *testing.T) {
 		m = press(next.(Model), "down")
 		m.fetch = fetch(sessionlist.Session{ID: "$0", Name: "z"}, sessionlist.Session{ID: "$2", Name: "b2"})
 		next, _ = m.Update(m.fetchCmd()())
-		if got, want := next.(Model).View().Content, "  z\n> b2"; got != want {
+		if got, want := next.(Model).View().Content, "    0 z\n>   0 b2"; got != want {
 			t.Errorf("View() = %q, want %q", got, want)
 		}
 	})
@@ -441,12 +441,12 @@ func TestModelRefresh(t *testing.T) {
 		if cmd == nil {
 			t.Fatal("失敗後の Update = nil, want 次の tick の Cmd")
 		}
-		if got, want := next.(Model).View().Content, "> a\n  b\n一覧を取得できません: boom"; got != want {
+		if got, want := next.(Model).View().Content, ">   0 a\n    0 b\n一覧を取得できません: boom"; got != want {
 			t.Errorf("失敗後の View() = %q, want %q", got, want)
 		}
 		next, cmd = next.Update(tickMsg{})
 		next, _ = next.Update(cmd())
-		if got, want := next.(Model).View().Content, "> a\n  b\n  c"; got != want {
+		if got, want := next.(Model).View().Content, ">   0 a\n    0 b\n    0 c"; got != want {
 			t.Errorf("次に取れた後の View() = %q, want %q", got, want)
 		}
 	})
@@ -458,7 +458,7 @@ func TestModelRefresh(t *testing.T) {
 		m = typeText(next.(Model), "nwo")
 		next, cmd := m.Update(tickMsg{})
 		next, _ = next.Update(cmd())
-		if got, want := next.(Model).View().Content, "> a\n  b\n  c\n新規セッション名: wo"; got != want {
+		if got, want := next.(Model).View().Content, ">   0 a\n    0 b\n    0 c\n新規セッション名: wo"; got != want {
 			t.Errorf("View() = %q, want %q", got, want)
 		}
 	})
@@ -502,7 +502,7 @@ func TestModelViewing(t *testing.T) {
 	t.Run("見ている id の行にだけ 2 桁目の印が付き、カーソルの印とは別の桁に出る", func(t *testing.T) {
 		m := New(sessionsWithID("$1", "$2", "$3"), nil, nil, viewingSeq(viewingResult{id: "$2", known: true}))
 		next, _ := m.Update(m.Init()())
-		if got, want := next.(Model).View().Content, "> s$1\n *s$2\n  s$3"; got != want {
+		if got, want := next.(Model).View().Content, ">   0 s$1\n *  0 s$2\n    0 s$3"; got != want {
 			t.Errorf("View() = %q, want %q", got, want)
 		}
 	})
@@ -510,7 +510,7 @@ func TestModelViewing(t *testing.T) {
 	t.Run("カーソルの行が見ている行のときは 1 桁目と 2 桁目の両方に印が付く", func(t *testing.T) {
 		m := New(sessionsWithID("$1", "$2"), nil, nil, viewingSeq(viewingResult{id: "$1", known: true}))
 		next, _ := m.Update(m.Init()())
-		if got, want := next.(Model).View().Content, ">*s$1\n  s$2"; got != want {
+		if got, want := next.(Model).View().Content, ">*  0 s$1\n    0 s$2"; got != want {
 			t.Errorf("View() = %q, want %q", got, want)
 		}
 	})
@@ -522,7 +522,7 @@ func TestModelViewing(t *testing.T) {
 		} {
 			m := New(sessionsWithID("$1", "$2"), nil, nil, viewingSeq(r))
 			next, _ := m.Update(m.Init()())
-			if got, want := next.(Model).View().Content, "> s$1\n  s$2"; got != want {
+			if got, want := next.(Model).View().Content, ">   0 s$1\n    0 s$2"; got != want {
 				t.Errorf("%s のとき View() = %q, want %q", name, got, want)
 			}
 		}
@@ -549,7 +549,7 @@ func TestModelViewing(t *testing.T) {
 		))
 		next, _ := m.Update(m.Init()())
 		m = refresh(t, next.(Model))
-		if got, want := m.View().Content, "> s$1\n *s$2"; got != want {
+		if got, want := m.View().Content, ">   0 s$1\n *  0 s$2"; got != want {
 			t.Errorf("View() = %q, want %q", got, want)
 		}
 	})
@@ -562,12 +562,97 @@ func TestModelViewing(t *testing.T) {
 		))
 		next, _ := m.Update(m.Init()())
 		m = refresh(t, next.(Model))
-		if got, want := m.View().Content, "> s$1\n  s$2\n右が見ているセッションを取得できません: boom"; got != want {
+		if got, want := m.View().Content, ">   0 s$1\n    0 s$2\n右が見ているセッションを取得できません: boom"; got != want {
 			t.Errorf("失敗後の View() = %q, want %q", got, want)
 		}
 		m = refresh(t, m)
-		if got, want := m.View().Content, "> s$1\n *s$2"; got != want {
+		if got, want := m.View().Content, ">   0 s$1\n *  0 s$2"; got != want {
 			t.Errorf("次に取れた後の View() = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestModelWindowsAndActivity(t *testing.T) {
+	t.Run("window 数 3 のセッションの行に window 数 3 が出る", func(t *testing.T) {
+		m, _ := load(t, func(context.Context) ([]sessionlist.Session, error) {
+			return []sessionlist.Session{{ID: "$1", Name: "a", Windows: 3}}, nil
+		})
+		if got, want := m.View().Content, ">   3 a"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("名前に空白・タブ・記号があっても名前と window 数が崩れない", func(t *testing.T) {
+		m, _ := load(t, func(context.Context) ([]sessionlist.Session, error) {
+			return []sessionlist.Session{{ID: "$1", Name: "a  b\t3 #{x},y:z", Windows: 3}}, nil
+		})
+		if got, want := m.View().Content, ">   3 a  b\t3 #{x},y:z"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("失敗の理由の行と 0 件の案内の行には window 数も印も付かない", func(t *testing.T) {
+		m, _ := load(t, func(context.Context) ([]sessionlist.Session, error) { return nil, errors.New("boom") })
+		if got, want := m.View().Content, "一覧を取得できません: boom"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("右で見ていないセッションの activity が進むと印が付き、右が見ると消える", func(t *testing.T) {
+		acts := []map[string]int64{
+			{"$1": 10, "$2": 10},
+			{"$1": 10, "$2": 20},
+			{"$1": 10, "$2": 20},
+		}
+		n := 0
+		fetch := func(context.Context) ([]sessionlist.Session, error) {
+			a := acts[n]
+			return []sessionlist.Session{
+				{ID: "$1", Name: "a", Windows: 1, Activity: a["$1"]},
+				{ID: "$2", Name: "b", Windows: 1, Activity: a["$2"]},
+			}, nil
+		}
+		viewing := func(context.Context) (string, bool, error) {
+			if n == 2 {
+				return "$2", true, nil
+			}
+			return "$1", true, nil
+		}
+		m := New(fetch, nil, nil, viewing)
+		next, _ := m.Update(m.Init()())
+		m = next.(Model)
+		if got, w := m.View().Content, ">*  1 a\n    1 b"; got != w {
+			t.Errorf("1 回目 View() = %q, want %q", got, w)
+		}
+		n = 1
+		m = refresh(t, m)
+		if got, w := m.View().Content, ">*  1 a\n  ! 1 b"; got != w {
+			t.Errorf("activity が進んだ後 View() = %q, want %q", got, w)
+		}
+		n = 2
+		m = refresh(t, m)
+		if got, w := m.View().Content, ">   1 a\n *  1 b"; got != w {
+			t.Errorf("右が見た後 View() = %q, want %q", got, w)
+		}
+	})
+}
+
+func TestModelMarksShareColumns(t *testing.T) {
+	t.Run("カーソルと activity の印が付く行と見ている印が付く行で、window 数と名前の桁が揃う", func(t *testing.T) {
+		n := 0
+		fetch := func(context.Context) ([]sessionlist.Session, error) {
+			return []sessionlist.Session{
+				{ID: "$1", Name: "a", Windows: 1, Activity: int64(10 + n)},
+				{ID: "$2", Name: "b", Windows: 12, Activity: 10},
+			}, nil
+		}
+		viewing := func(context.Context) (string, bool, error) { return "$2", true, nil }
+		m := New(fetch, nil, nil, viewing)
+		next, _ := m.Update(m.Init()())
+		n = 1
+		m = refresh(t, next.(Model))
+		if got, want := m.View().Content, "> ! 1 a\n * 12 b"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
 		}
 	})
 }
