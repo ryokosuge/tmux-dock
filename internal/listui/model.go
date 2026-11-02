@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -23,12 +24,18 @@ const (
 	cursorMark   = "> "
 	noCursorMark = "  "
 	inputPrompt  = "新規セッション名: "
+
+	// refreshInterval は一覧を取り直す間隔の既定。
+	refreshInterval = time.Second
 )
 
 type sessionsMsg struct {
 	sessions []sessionlist.Session
 	err      error
 }
+
+// tickMsg は取り直しの時刻が来たことを表す。
+type tickMsg struct{}
 
 type switchedMsg struct {
 	session sessionlist.Session
@@ -39,7 +46,8 @@ type createdMsg struct {
 	err error
 }
 
-// Model は起動時に一覧を 1 回だけ取り、カーソル付きで描く。Enter で選んだセッションを switchTo に渡す。
+// Model は一覧を interval ごとに取り直し、カーソル付きで描く。前の取得が終わってから次の tick を張る。
+// 取り直しに失敗したら前回の一覧を残して理由の 1 行を出し、次に取れたらその行を消す。Enter で選んだセッションを switchTo に渡す。
 // n で名前の入力に入り、確定した名前を create に渡す。入力中はカーソルを動かさない。
 type Model struct {
 	fetch    fetchFunc
@@ -47,9 +55,12 @@ type Model struct {
 	create   createFunc
 	sessions []sessionlist.Session
 	cursor   int
-	// notice は一覧の代わりに（取得の失敗）または一覧の下に（切り替えの失敗）出す 1 行。
-	notice    string
-	loadError bool
+	// notice は一覧の下に出す、切り替えの失敗の 1 行。
+	notice string
+	// loadNotice は取得の失敗の 1 行。一覧を一度も取れていない間は一覧の代わりに、取れた後は一覧の下に出す。
+	loadNotice string
+	loaded     bool
+	interval   time.Duration
 	// inputting は名前の入力中。input は入力中の名前、inputError は作成に失敗したときの理由の 1 行。
 	// creating は作成関数の結果待ちで、その間の打鍵は名前に足さない。
 	inputting  bool
@@ -60,12 +71,17 @@ type Model struct {
 
 // New の switchTo は nil でもよく、そのとき Enter は何もしない。create も nil でもよく、そのとき n は何もしない。
 func New(fetch fetchFunc, switchTo switchFunc, create createFunc) Model {
-	return Model{fetch: fetch, switchTo: switchTo, create: create}
+	return Model{fetch: fetch, switchTo: switchTo, create: create, interval: refreshInterval}
 }
 
 func (m Model) Init() tea.Cmd {
+	return m.fetchCmd()
+}
+
+func (m Model) fetchCmd() tea.Cmd {
+	fetch := m.fetch
 	return func() tea.Msg {
-		ss, err := m.fetch(context.Background())
+		ss, err := fetch(context.Background())
 		return sessionsMsg{sessions: ss, err: err}
 	}
 }
@@ -73,15 +89,16 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case sessionsMsg:
-		m.cursor = 0
-		m.notice = ""
-		m.loadError = msg.err != nil
 		if msg.err != nil {
-			m.sessions = nil
-			m.notice = fmt.Sprintf("一覧を取得できません: %v", msg.err)
+			m.loadNotice = fmt.Sprintf("一覧を取得できません: %v", msg.err)
 		} else {
-			m.sessions = msg.sessions
+			m.loadNotice = ""
+			m.loaded = true
+			m.sessions, m.cursor = follow(m.sessions, m.cursor, msg.sessions)
 		}
+		return m, tea.Tick(m.interval, func(time.Time) tea.Msg { return tickMsg{} })
+	case tickMsg:
+		return m, m.fetchCmd()
 	case switchedMsg:
 		if msg.err != nil {
 			m.notice = fmt.Sprintf("%s に切り替えられません: %v", msg.session.Name, msg.err)
@@ -165,8 +182,8 @@ func (m Model) updateInput(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() tea.View {
 	var lines []string
-	if m.loadError {
-		lines = []string{m.notice}
+	if m.loadNotice != "" && !m.loaded {
+		lines = []string{m.loadNotice}
 	} else {
 		lines = sessionlist.Lines(m.sessions)
 		if len(m.sessions) > 0 {
@@ -180,6 +197,9 @@ func (m Model) View() tea.View {
 		}
 		if m.notice != "" {
 			lines = append(lines, m.notice)
+		}
+		if m.loadNotice != "" {
+			lines = append(lines, m.loadNotice)
 		}
 	}
 	if m.inputting {

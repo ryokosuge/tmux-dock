@@ -121,6 +121,69 @@ func TestTmuxDockCommand(t *testing.T) {
 		}
 	})
 
+	t.Run("起動後に普段のサーバでセッションを作る・改名する・消すと、開き直さずに左ペインの一覧が追随する", func(t *testing.T) {
+		harness, outer, inner := newSockets(t)
+		for _, name := range []string{"a", "b"} {
+			tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", name)
+		}
+
+		startDock(t, bin, harness, outer, inner)
+		waitLeftPane(t, outer, func(s string) bool { return hasLine(s, "a") && hasLine(s, "b") })
+
+		steps := []struct {
+			op      string
+			args    []string
+			present []string
+			absent  []string
+		}{
+			{"作成", []string{"new-session", "-d", "-s", "c"}, []string{"a", "b", "c"}, nil},
+			{"改名", []string{"rename-session", "-t", "=b", "b2"}, []string{"a", "b2", "c"}, []string{"b"}},
+			{"削除", []string{"kill-session", "-t", "=a"}, []string{"b2", "c"}, []string{"a"}},
+		}
+		for _, st := range steps {
+			tmuxOut(t, inner, st.args...)
+			left := waitLeftPane(t, outer, func(s string) bool {
+				for _, n := range st.present {
+					if !hasLine(s, n) {
+						return false
+					}
+				}
+				for _, n := range st.absent {
+					if hasLine(s, n) {
+						return false
+					}
+				}
+				return true
+			})
+			for _, n := range st.present {
+				if !hasLine(left, n) {
+					t.Errorf("%s の後の左ペインの表示 = %q, want 行 %q を含む", st.op, left, n)
+				}
+			}
+			for _, n := range st.absent {
+				if hasLine(left, n) {
+					t.Errorf("%s の後の左ペインの表示 = %q, want 行 %q を含まない", st.op, left, n)
+				}
+			}
+		}
+	})
+
+	t.Run("一覧が取り直しを何度か繰り返した後も、普段のサーバの構成は起動前と同じ", func(t *testing.T) {
+		harness, outer, inner := newSockets(t)
+		for _, name := range []string{"a", "b"} {
+			tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", name, "-n", "w")
+		}
+		before := innerLayout(t, inner)
+
+		startDock(t, bin, harness, outer, inner)
+		waitLeftPane(t, outer, func(s string) bool { return hasLine(s, "a") && hasLine(s, "b") })
+		time.Sleep(3500 * time.Millisecond) // 1 秒ごとの取り直しが 3 回以上回る
+
+		if after := innerLayout(t, inner); after != before {
+			t.Errorf("取り直しの後の普段のサーバの構成 = %q, want %q", after, before)
+		}
+	})
+
 	t.Run("普段のサーバが無いと左ペインに「セッションがありません」が出て、サーバは立たない", func(t *testing.T) {
 		harness, outer, inner := newSockets(t)
 
