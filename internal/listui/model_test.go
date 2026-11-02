@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -353,6 +354,111 @@ func TestModelCreateInput(t *testing.T) {
 	t.Run("作成関数が nil のとき n を押しても入力は始まらない", func(t *testing.T) {
 		m := loadWithCreate(t, names("a", "b"), nil)
 		if got, want := typeText(m, "n").View().Content, "> a\n  b"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+}
+
+type result struct {
+	names []string
+	err   error
+}
+
+// sequence は呼ばれるたびに responses を先頭から 1 つずつ返す取得関数。
+
+func sequence(calls *int, responses ...result) fetchFunc {
+	return func(ctx context.Context) ([]sessionlist.Session, error) {
+		r := responses[*calls]
+		*calls++
+		if r.err != nil {
+			return nil, r.err
+		}
+		return names(r.names...)(ctx)
+	}
+}
+
+func TestModelRefresh(t *testing.T) {
+	t.Run("取得結果を受けた Update は次の tick を張る Cmd を返し、取得はまだ呼ばない", func(t *testing.T) {
+		calls := 0
+		m := New(sequence(&calls, result{names: []string{"a"}}), nil, nil)
+		m.interval = time.Nanosecond
+		_, cmd := m.Update(m.Init()())
+		if cmd == nil {
+			t.Fatal("取得結果の Update = nil, want 次の tick の Cmd")
+		}
+		if calls != 1 {
+			t.Errorf("tick の前の取得回数 = %d, want 1", calls)
+		}
+		if _, ok := cmd().(tickMsg); !ok {
+			t.Errorf("tick の Cmd の結果 = %T, want tickMsg", cmd())
+		}
+	})
+
+	t.Run("tick のメッセージで取得が呼ばれ、その結果で一覧が差し替わる", func(t *testing.T) {
+		calls := 0
+		m := New(sequence(&calls, result{names: []string{"a", "b"}}, result{names: []string{"a", "c", "d"}}), nil, nil)
+		next, _ := m.Update(m.Init()())
+		next, cmd := next.Update(tickMsg{})
+		if cmd == nil {
+			t.Fatal("tick の Update = nil, want 取得の Cmd")
+		}
+		if calls != 1 {
+			t.Fatalf("Cmd を実行する前の取得回数 = %d, want 1", calls)
+		}
+		next, _ = next.Update(cmd())
+		if calls != 2 {
+			t.Errorf("取得回数 = %d, want 2", calls)
+		}
+		if got, want := next.(Model).View().Content, "> a\n  c\n  d"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("取り直しの前後でカーソルは同じセッションを追う", func(t *testing.T) {
+		fetch := func(ss ...sessionlist.Session) fetchFunc {
+			return func(context.Context) ([]sessionlist.Session, error) { return ss, nil }
+		}
+		m := New(fetch(sessionlist.Session{ID: "$1", Name: "a"}, sessionlist.Session{ID: "$2", Name: "b"}), nil, nil)
+		next, _ := m.Update(m.Init()())
+		m = press(next.(Model), "down")
+		m.fetch = fetch(sessionlist.Session{ID: "$0", Name: "z"}, sessionlist.Session{ID: "$2", Name: "b2"})
+		next, _ = m.Update(m.fetchCmd()())
+		if got, want := next.(Model).View().Content, "  z\n> b2"; got != want {
+			t.Errorf("View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("取り直しが失敗すると前回の一覧を残して理由の 1 行を出し、次に取れたらその行が消える", func(t *testing.T) {
+		calls := 0
+		m := New(sequence(&calls,
+			result{names: []string{"a", "b"}},
+			result{err: errors.New("boom")},
+			result{names: []string{"a", "b", "c"}},
+		), nil, nil)
+		next, _ := m.Update(m.Init()())
+		next, cmd := next.Update(tickMsg{})
+		next, cmd = next.Update(cmd())
+		if cmd == nil {
+			t.Fatal("失敗後の Update = nil, want 次の tick の Cmd")
+		}
+		if got, want := next.(Model).View().Content, "> a\n  b\n一覧を取得できません: boom"; got != want {
+			t.Errorf("失敗後の View() = %q, want %q", got, want)
+		}
+		next, cmd = next.Update(tickMsg{})
+		next, _ = next.Update(cmd())
+		if got, want := next.(Model).View().Content, "> a\n  b\n  c"; got != want {
+			t.Errorf("次に取れた後の View() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("名前の入力中に取り直しが来ても入力中の名前は変わらない", func(t *testing.T) {
+		calls := 0
+		m := New(sequence(&calls, result{names: []string{"a", "b"}}, result{names: []string{"a", "b", "c"}}), nil, recordCreate(new([]string), nil))
+		next, _ := m.Update(m.Init()())
+		m = typeText(next.(Model), "nwo")
+		next, cmd := m.Update(tickMsg{})
+		next, _ = next.Update(cmd())
+		if got, want := next.(Model).View().Content, "> a\n  b\n  c\n新規セッション名: wo"; got != want {
 			t.Errorf("View() = %q, want %q", got, want)
 		}
 	})
