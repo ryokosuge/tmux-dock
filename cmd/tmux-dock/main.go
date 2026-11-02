@@ -65,7 +65,8 @@ func runList(args []string) error {
 	create := func(ctx context.Context, name string) error {
 		return switcher.Open(ctx, dock.ExecRunner, cfg, name)
 	}
-	if _, err := tea.NewProgram(listui.New(fetch, switchTo, create, nil)).Run(); err != nil {
+	viewing := switcher.NewViewer(dock.ExecRunner, cfg).Viewing
+	if _, err := tea.NewProgram(listui.New(fetch, switchTo, create, viewing)).Run(); err != nil {
 		return fmt.Errorf("一覧の画面を動かせなかった: %w", err)
 	}
 	return nil
