@@ -246,7 +246,8 @@ func waitLeftPane(t *testing.T, outer string, ok func(string) bool) string {
 
 func hasLine(s, line string) bool {
 	for _, l := range strings.Split(s, "\n") {
-		if strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), ">")) == line {
+		l = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), ">")) // カーソルの印
+		if strings.TrimSpace(strings.TrimPrefix(l, "*")) == line {           // 見ている印
 			return true
 		}
 	}
