@@ -29,7 +29,10 @@ const (
 	// viewingMark は右が見ているセッションの行の 2 桁目に付く。1 桁目はカーソルの印。
 	viewingMark   = "*"
 	noViewingMark = " "
-	inputPrompt   = "新規セッション名: "
+	// activityMark は右で見ていない間に activity が進んだセッションの行の 3 桁目に付く。ASCII 1 文字の固定幅。
+	activityMark   = "!"
+	noActivityMark = " "
+	inputPrompt    = "新規セッション名: "
 
 	// refreshInterval は一覧を取り直す間隔の既定。
 	refreshInterval = time.Second
@@ -76,7 +79,10 @@ type Model struct {
 	viewingID     string
 	viewingKnown  bool
 	viewingNotice string
-	interval      time.Duration
+	// activityBase は session_id → 最後に右で見た時点の Activity、activityMarked は activity の印を付けるセッションの id。
+	activityBase   map[string]int64
+	activityMarked map[string]bool
+	interval       time.Duration
 	// inputting は名前の入力中。input は入力中の名前、inputError は作成に失敗したときの理由の 1 行。
 	// creating は作成関数の結果待ちで、その間の打鍵は名前に足さない。
 	inputting  bool
@@ -125,6 +131,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewingNotice = fmt.Sprintf("右が見ているセッションを取得できません: %v", msg.viewingErr)
 				}
 			}
+			m.activityBase, m.activityMarked = activityMarks(m.activityBase, msg.sessions, m.viewingID, m.viewingKnown)
 		}
 		return m, tea.Tick(m.interval, func(time.Time) tea.Msg { return tickMsg{} })
 	case tickMsg:
@@ -226,7 +233,11 @@ func (m Model) View() tea.View {
 				if m.viewingKnown && m.sessions[i].ID == m.viewingID {
 					view = viewingMark
 				}
-				lines[i] = mark + view + lines[i]
+				act := noActivityMark
+				if m.activityMarked[m.sessions[i].ID] {
+					act = activityMark
+				}
+				lines[i] = mark + view + act + lines[i]
 			}
 		}
 		if m.notice != "" {

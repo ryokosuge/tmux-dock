@@ -9,7 +9,7 @@ import (
 func hasViewingLine(s, name string) bool {
 	for _, l := range strings.Split(s, "\n") {
 		r := []rune(l)
-		if len(r) > 1 && r[1] == '*' && strings.Fields(string(r[2:]))[0] == name {
+		if len(r) > 1 && r[1] == '*' && rowPrefix.ReplaceAllString(l, "") == name {
 			return true
 		}
 	}

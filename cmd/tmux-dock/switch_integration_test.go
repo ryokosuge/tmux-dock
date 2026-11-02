@@ -67,8 +67,7 @@ func selectListRow(t *testing.T, outer, row string) {
 
 func cursorOn(left, row string) bool {
 	for _, l := range strings.Split(left, "\n") {
-		l = strings.TrimSpace(l)
-		if strings.HasPrefix(l, ">") && strings.TrimSpace(strings.TrimPrefix(l, ">")) == row {
+		if strings.HasPrefix(l, ">") && rowPrefix.ReplaceAllString(l, "") == row {
 			return true
 		}
 	}
