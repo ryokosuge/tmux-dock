@@ -68,6 +68,24 @@ func TestFetchIntegration(t *testing.T) {
 		}
 	})
 
+	t.Run("window 数 2 のセッションは window 数 2 と 0 より大きい activity が取れ構成は取得前と同じ", func(t *testing.T) {
+		inner := newInnerSocket(t)
+		tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", "w")
+		tmuxOut(t, inner, "new-window", "-d", "-t", "w")
+		before := innerLayout(t, inner)
+
+		got, err := Fetch(ctx, dock.ExecRunner, inner)
+		if err != nil {
+			t.Fatalf("Fetch() = %v", err)
+		}
+		if len(got) != 1 || got[0].Name != "w" || got[0].Windows != 2 || got[0].Activity <= 0 {
+			t.Errorf("Fetch() = %+v, want w の Windows=2 と Activity>0", got)
+		}
+		if after := innerLayout(t, inner); after != before {
+			t.Errorf("取得後の構成 = %q, want %q", after, before)
+		}
+	})
+
 	t.Run("サーバが無いとき 0 件でエラーにならずサーバも立たない", func(t *testing.T) {
 		inner := newInnerSocket(t)
 

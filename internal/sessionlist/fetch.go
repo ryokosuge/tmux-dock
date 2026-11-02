@@ -36,7 +36,11 @@ func Fetch(ctx context.Context, run dock.Runner, innerSocket string) ([]Session,
 		return nil, fmt.Errorf("tmux %s を実行できない: %w", strings.Join(args, " "), err)
 	}
 	if res.ExitCode == 0 {
-		return Parse(res.Stdout), nil
+		ss, err := Parse(res.Stdout)
+		if err != nil {
+			return ss, fmt.Errorf("tmux %s の出力を解析できない: %w", strings.Join(args, " "), err)
+		}
+		return ss, nil
 	}
 	if res.ExitCode == listSessionsNoServer && isNoServer(res.Stderr) {
 		return nil, nil

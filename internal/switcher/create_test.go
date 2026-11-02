@@ -61,7 +61,7 @@ func TestCreateArgs(t *testing.T) {
 
 func TestOpen(t *testing.T) {
 	ctx := context.Background()
-	listOut := dock.Result{Stdout: []byte("$1 work\n")}
+	listOut := dock.Result{Stdout: []byte("$1\t1\t5 \twork\n")}
 	listArgs := sessionlist.ListArgs("inner-x")
 
 	t.Run("新しい名前は一覧、new-session、tty、switch-client の順で session_id へ切り替える", func(t *testing.T) {
