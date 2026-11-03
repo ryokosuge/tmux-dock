@@ -70,7 +70,7 @@ func TestTmuxDockCommand(t *testing.T) {
 	t.Run("端末で実行すると外側に左右 2 ペインのセッションができ attach され、外側を終えても普段のサーバの構成は同じ", func(t *testing.T) {
 		harness, outer, inner := newSockets(t)
 		for _, name := range []string{"a", "b"} {
-			tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", name)
+			tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", name, "-n", "w")
 		}
 		before := innerLayout(t, inner)
 
@@ -107,7 +107,7 @@ func TestTmuxDockCommand(t *testing.T) {
 	t.Run("普段のサーバにセッション a, b があると外側の左ペインに a と b が出て、構成は起動前と同じ", func(t *testing.T) {
 		harness, outer, inner := newSockets(t)
 		for _, name := range []string{"a", "b"} {
-			tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", name)
+			tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", name, "-n", "w")
 		}
 		before := innerLayout(t, inner)
 
