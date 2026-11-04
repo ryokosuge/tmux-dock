@@ -55,6 +55,7 @@ func TestWriteToFailsWhenBaseDirIsFile(t *testing.T) {
 
 func TestContentHasKeyBindings(t *testing.T) {
 	for _, line := range []string{
+		"set -s set-clipboard on",
 		"set -g prefix None",
 		"set -g prefix2 None",
 		"bind -n F12 select-pane -t :.+",
