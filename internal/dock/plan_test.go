@@ -22,8 +22,10 @@ func TestNewPlan(t *testing.T) {
 			"new-session", "-d", "-s", "dock",
 			"/opt/my tools/tmux-dock", "list", "--inner-socket", "default", ";", "split-window", "-h", "-t", "=dock:",
 			"/opt/my tools/tmux-dock", "attach", "--inner-socket", "default"},
-		Attach: []string{"-L", "tmux-dock", "attach-session", "-t", "=dock"},
-		Reload: []string{"-L", "tmux-dock", "source-file", testConf},
+		Attach:    []string{"-L", "tmux-dock", "attach-session", "-t", "=dock"},
+		Reload:    []string{"-L", "tmux-dock", "source-file", testConf},
+		ListPanes: []string{"-L", "tmux-dock", "list-panes", "-s", "-t", "=dock:", "-F", "#{window_index} #{pane_dead}"},
+		Kill:      []string{"-L", "tmux-dock", "kill-session", "-t", "=dock"},
 	}
 	if got := testPlan(); !reflect.DeepEqual(got, want) {
 		t.Errorf("NewPlan() = %+v, want %+v", got, want)
@@ -35,6 +37,7 @@ func TestNewPlanSocketIsolation(t *testing.T) {
 	plan := NewPlan(cfg, testConf, testLeftCommand, testRightCommand)
 	for name, args := range map[string][]string{
 		"HasSession": plan.HasSession, "Create": plan.Create, "Attach": plan.Attach, "Reload": plan.Reload,
+		"ListPanes": plan.ListPanes, "Kill": plan.Kill,
 	} {
 		t.Run(name+"は外側のソケットだけを指す", func(t *testing.T) {
 			var sockets []string

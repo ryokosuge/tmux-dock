@@ -193,3 +193,61 @@ func TestEnsureSessionReloadsConfIntegration(t *testing.T) {
 		}
 	})
 }
+
+func TestEnsureSessionRepairsBrokenSessionIntegration(t *testing.T) {
+	outer, inner := newSockets(t)
+	tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", "a")
+	before := innerLayout(t, inner)
+
+	p := NewPlan(Config{InnerSocket: inner, OuterSocket: outer, SessionName: SessionName}, "/dev/null", []string{"sleep", "300"}, []string{"sleep", "300"})
+	ctx := context.Background()
+	if err := EnsureSession(ctx, ExecRunner, p); err != nil {
+		t.Fatalf("EnsureSession() 1 回目 = %v", err)
+	}
+	// 外側のサーバを生かしたまま右のペインだけを消し、1 ペインの dock にする。
+	tmuxOut(t, outer, "new-session", "-d", "-s", "keep", "sleep", "300")
+	tmuxOut(t, outer, "kill-pane", "-t", "="+SessionName+":.1")
+	if got := tmuxOut(t, outer, "list-panes", "-s", "-t", "="+SessionName+":", "-F", "#{pane_id}"); len(strings.Fields(got)) != 1 {
+		t.Fatalf("壊した後のペイン = %q, want 1 つ", got)
+	}
+
+	if err := EnsureSession(ctx, ExecRunner, p); err != nil {
+		t.Fatalf("壊れた dock への EnsureSession() = %v, want nil", err)
+	}
+
+	t.Run("外側の dock のセッションは 1 つで window 1・ペイン 2 に戻る", func(t *testing.T) {
+		if got, want := tmuxOut(t, outer, "list-sessions", "-F", "#{session_name}"), SessionName+"\nkeep\n"; got != want {
+			t.Errorf("list-sessions = %q, want %q", got, want)
+		}
+		if got := tmuxOut(t, outer, "list-windows", "-t", "="+SessionName+":", "-F", "#{window_id}"); len(strings.Fields(got)) != 1 {
+			t.Errorf("list-windows = %q, want window 1 つ", got)
+		}
+		if got := tmuxOut(t, outer, "list-panes", "-s", "-t", "="+SessionName+":", "-F", "#{pane_id}"); len(strings.Fields(got)) != 2 {
+			t.Errorf("list-panes = %q, want ペイン 2 つ", got)
+		}
+	})
+
+	t.Run("普段のサーバの構成が実行前と同じ", func(t *testing.T) {
+		if after := innerLayout(t, inner); after != before {
+			t.Errorf("普段のサーバの構成 = %q, want %q", after, before)
+		}
+	})
+}
+
+func TestEnsureSessionUnrepairableIntegration(t *testing.T) {
+	outer, inner := newSockets(t)
+	// split-window が必ず失敗する Plan。new-session だけが成功して 1 ペインの dock が残る。
+	p := NewPlan(Config{InnerSocket: inner, OuterSocket: outer, SessionName: SessionName}, "/dev/null", []string{"sleep", "300"}, []string{"sleep", "300"})
+	for i, a := range p.Create {
+		if a == "split-window" {
+			p.Create = append(p.Create[:i+1], append([]string{"-l", "abc"}, p.Create[i+1:]...)...)
+			break
+		}
+	}
+
+	err := EnsureSession(context.Background(), ExecRunner, p)
+	if err == nil {
+		t.Fatalf("EnsureSession() = nil, want エラー（1 ペインの dock に繋がせない）。create=%v", p.Create)
+	}
+	t.Logf("EnsureSession() = %v", err)
+}
