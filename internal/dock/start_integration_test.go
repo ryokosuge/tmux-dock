@@ -115,3 +115,40 @@ func TestEnsureSessionIntegration(t *testing.T) {
 		}
 	})
 }
+
+func TestEnsureSessionConcurrentIntegration(t *testing.T) {
+	outer, inner := newSockets(t)
+	tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", "a")
+	before := innerLayout(t, inner)
+
+	p := NewPlan(Config{InnerSocket: inner, OuterSocket: outer, SessionName: SessionName}, "/dev/null", []string{"sleep", "300"}, []string{"sleep", "300"})
+
+	const starters = 2
+	errs := make(chan error, starters)
+	for range starters {
+		go func() { errs <- EnsureSession(context.Background(), ExecRunner, p) }()
+	}
+	for i := 0; i < starters; i++ {
+		if err := <-errs; err != nil {
+			t.Errorf("並行の EnsureSession() = %v, want nil", err)
+		}
+	}
+
+	t.Run("外側のセッションは 1 つで window 1・ペイン 2 のまま", func(t *testing.T) {
+		if got, want := tmuxOut(t, outer, "list-sessions", "-F", "#{session_name}"), SessionName+"\n"; got != want {
+			t.Errorf("list-sessions = %q, want %q", got, want)
+		}
+		if got := tmuxOut(t, outer, "list-windows", "-a", "-F", "#{window_id}"); len(strings.Fields(got)) != 1 {
+			t.Errorf("list-windows = %q, want window 1 つ", got)
+		}
+		if got := tmuxOut(t, outer, "list-panes", "-a", "-F", "#{pane_id}"); len(strings.Fields(got)) != 2 {
+			t.Errorf("list-panes = %q, want ペイン 2 つ", got)
+		}
+	})
+
+	t.Run("普段のサーバの構成が実行前と同じ", func(t *testing.T) {
+		if after := innerLayout(t, inner); after != before {
+			t.Errorf("普段のサーバの構成 = %q, want %q", after, before)
+		}
+	})
+}
