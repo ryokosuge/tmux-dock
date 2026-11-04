@@ -40,7 +40,7 @@ func ExecRunner(ctx context.Context, args []string) (Result, error) {
 	return res, err
 }
 
-// EnsureSession は外側のセッションが無ければ p.Create で作る。あれば何も作らない。
+// EnsureSession は外側のセッションが無ければ p.Create で作る。あれば作らず、p.Reload で同梱 conf を外側に流し直す。
 // has-session の終了コード 1（サーバ無しを含む）は「セッション無し」でありエラーにしない。
 // 同時起動で p.Create が負けた場合も、確かめ直しの has-session が 0 ならセッションがあるので成功として扱う。
 func EnsureSession(ctx context.Context, run Runner, p Plan) error {
@@ -50,7 +50,7 @@ func EnsureSession(ctx context.Context, run Runner, p Plan) error {
 	}
 	switch res.ExitCode {
 	case 0:
-		return nil
+		return reload(ctx, run, p)
 	case hasSessionMissing:
 	default:
 		return execFailure(p.HasSession, res)
@@ -69,6 +69,19 @@ func EnsureSession(ctx context.Context, run Runner, p Plan) error {
 		if res.ExitCode != 0 {
 			return execFailure(p.Create, created)
 		}
+		return reload(ctx, run, p)
+	}
+	return nil
+}
+
+// reload は既存の外側に同梱 conf を流し直す。set -g / bind は何度流しても結果が同じ。
+func reload(ctx context.Context, run Runner, p Plan) error {
+	res, err := run(ctx, p.Reload)
+	if err != nil {
+		return fmt.Errorf("tmux %s を実行できない: %w", strings.Join(p.Reload, " "), err)
+	}
+	if res.ExitCode != 0 {
+		return execFailure(p.Reload, res)
 	}
 	return nil
 }

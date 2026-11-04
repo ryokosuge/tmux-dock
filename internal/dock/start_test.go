@@ -8,14 +8,15 @@ import (
 	"testing"
 )
 
-// recordingRunner は呼ばれた引数を記録し、has-session / create の結果を差し替える。
+// recordingRunner は呼ばれた引数を記録し、has-session / create / reload の結果を差し替える。
 // recheck を入れると、2 回目以降の has-session はそちらを返す（create 後の確かめ直し用）。
 type recordingRunner struct {
-	has, create Result
-	recheck     *Result
-	hasErr      error
-	calls       [][]string
-	hasCalls    int
+	has, create, reload Result
+	reloadErr           error
+	recheck             *Result
+	hasErr              error
+	calls               [][]string
+	hasCalls            int
 }
 
 func (r *recordingRunner) run(_ context.Context, args []string) (Result, error) {
@@ -27,19 +28,38 @@ func (r *recordingRunner) run(_ context.Context, args []string) (Result, error) 
 		}
 		return r.has, r.hasErr
 	}
+	if reflect.DeepEqual(args, testPlan().Reload) {
+		return r.reload, r.reloadErr
+	}
 	return r.create, nil
 }
 
 func TestEnsureSession(t *testing.T) {
 	p := testPlan()
 
-	t.Run("セッションがあるときは作成を流さない", func(t *testing.T) {
+	t.Run("セッションがあるときは作成を流さず conf を流し直す", func(t *testing.T) {
 		r := &recordingRunner{}
 		if err := EnsureSession(context.Background(), r.run, p); err != nil {
 			t.Fatalf("EnsureSession() = %v, want nil", err)
 		}
-		if want := [][]string{p.HasSession}; !reflect.DeepEqual(r.calls, want) {
+		if want := [][]string{p.HasSession, p.Reload}; !reflect.DeepEqual(r.calls, want) {
 			t.Errorf("tmux の呼び出し = %v, want %v", r.calls, want)
+		}
+	})
+
+	t.Run("流し直しが非 0 で終わったら stderr をエラーに含める", func(t *testing.T) {
+		r := &recordingRunner{reload: Result{ExitCode: 1, Stderr: "no such file: dock.conf"}}
+		err := EnsureSession(context.Background(), r.run, p)
+		if err == nil || !strings.Contains(err.Error(), "no such file: dock.conf") {
+			t.Errorf("EnsureSession() = %v, want stderr %q を含むエラー", err, "no such file: dock.conf")
+		}
+	})
+
+	t.Run("流し直しの tmux を起動できなかったら元のエラーを包んで返す", func(t *testing.T) {
+		cause := errors.New("fork failed")
+		r := &recordingRunner{reloadErr: cause}
+		if err := EnsureSession(context.Background(), r.run, p); !errors.Is(err, cause) {
+			t.Errorf("EnsureSession() = %v, want %v を包むエラー", err, cause)
 		}
 	})
 
@@ -73,7 +93,7 @@ func TestEnsureSession(t *testing.T) {
 		if err := EnsureSession(context.Background(), r.run, p); err != nil {
 			t.Fatalf("EnsureSession() = %v, want nil", err)
 		}
-		if want := [][]string{p.HasSession, p.Create, p.HasSession}; !reflect.DeepEqual(r.calls, want) {
+		if want := [][]string{p.HasSession, p.Create, p.HasSession, p.Reload}; !reflect.DeepEqual(r.calls, want) {
 			t.Errorf("tmux の呼び出し = %v, want %v", r.calls, want)
 		}
 	})

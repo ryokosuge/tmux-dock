@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ryokosuge/tmux-dock/internal/outerconf"
 )
 
 // maxNameLen はソケット名に入れる t.Name() 由来の部分の最大バイト数。
@@ -143,6 +145,45 @@ func TestEnsureSessionConcurrentIntegration(t *testing.T) {
 		}
 		if got := tmuxOut(t, outer, "list-panes", "-a", "-F", "#{pane_id}"); len(strings.Fields(got)) != 2 {
 			t.Errorf("list-panes = %q, want ペイン 2 つ", got)
+		}
+	})
+
+	t.Run("普段のサーバの構成が実行前と同じ", func(t *testing.T) {
+		if after := innerLayout(t, inner); after != before {
+			t.Errorf("普段のサーバの構成 = %q, want %q", after, before)
+		}
+	})
+}
+
+func TestEnsureSessionReloadsConfIntegration(t *testing.T) {
+	outer, inner := newSockets(t)
+	tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", "a")
+	before := innerLayout(t, inner)
+
+	// -f /dev/null で立てた外側は同梱 conf を持たず、set-clipboard が既定の external のまま。
+	tmuxOut(t, outer, "-f", "/dev/null", "new-session", "-d", "-s", SessionName, "sleep", "300")
+	if got := tmuxOut(t, outer, "show", "-s", "-v", "set-clipboard"); strings.TrimSpace(got) != "external" {
+		t.Fatalf("先に立てた外側の set-clipboard = %q, want external", got)
+	}
+
+	confPath, err := outerconf.WriteTo(t.TempDir())
+	if err != nil {
+		t.Fatalf("outerconf.WriteTo() = %v", err)
+	}
+	p := NewPlan(Config{InnerSocket: inner, OuterSocket: outer, SessionName: SessionName}, confPath, []string{"sleep", "300"}, []string{"sleep", "300"})
+	if err := EnsureSession(context.Background(), ExecRunner, p); err != nil {
+		t.Fatalf("EnsureSession() = %v", err)
+	}
+
+	t.Run("既に動いている外側の set-clipboard が on になる", func(t *testing.T) {
+		if got := tmuxOut(t, outer, "show", "-s", "-v", "set-clipboard"); strings.TrimSpace(got) != "on" {
+			t.Errorf("set-clipboard = %q, want on", got)
+		}
+	})
+
+	t.Run("外側のセッションは 1 つのまま", func(t *testing.T) {
+		if got, want := tmuxOut(t, outer, "list-sessions", "-F", "#{session_name}"), SessionName+"\n"; got != want {
+			t.Errorf("list-sessions = %q, want %q", got, want)
 		}
 	})
 

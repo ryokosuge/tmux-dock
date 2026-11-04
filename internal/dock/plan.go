@@ -1,11 +1,13 @@
 package dock
 
-// Plan は外側の tmux を起動する 3 つの tmux 呼び出しの引数。
+// Plan は外側の tmux を起動する 4 つの tmux 呼び出しの引数。
 // 先頭の "tmux" は含まない。
 type Plan struct {
 	HasSession []string
 	Create     []string
 	Attach     []string
+	// Reload は既に動いている外側に同梱 conf を流し直す。-f は外側の起動時にしか読まれないため。
+	Reload []string
 }
 
 // NewPlan は外側のソケットだけを指す起動手順を組み立てる。tmux は呼ばない。
@@ -22,6 +24,7 @@ func NewPlan(cfg Config, confPath string, leftCommand, rightCommand []string) Pl
 			";",
 			"split-window", "-h", "-t", target+":"), rightCommand...)...),
 		Attach: join(outer, "attach-session", "-t", target),
+		Reload: join(outer, "source-file", confPath),
 	}
 }
 

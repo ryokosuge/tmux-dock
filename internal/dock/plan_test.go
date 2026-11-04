@@ -23,6 +23,7 @@ func TestNewPlan(t *testing.T) {
 			"/opt/my tools/tmux-dock", "list", "--inner-socket", "default", ";", "split-window", "-h", "-t", "=dock:",
 			"/opt/my tools/tmux-dock", "attach", "--inner-socket", "default"},
 		Attach: []string{"-L", "tmux-dock", "attach-session", "-t", "=dock"},
+		Reload: []string{"-L", "tmux-dock", "source-file", testConf},
 	}
 	if got := testPlan(); !reflect.DeepEqual(got, want) {
 		t.Errorf("NewPlan() = %+v, want %+v", got, want)
@@ -33,7 +34,7 @@ func TestNewPlanSocketIsolation(t *testing.T) {
 	cfg := Config{InnerSocket: "inner-x", OuterSocket: "outer-x", SessionName: "dock"}
 	plan := NewPlan(cfg, testConf, testLeftCommand, testRightCommand)
 	for name, args := range map[string][]string{
-		"HasSession": plan.HasSession, "Create": plan.Create, "Attach": plan.Attach,
+		"HasSession": plan.HasSession, "Create": plan.Create, "Attach": plan.Attach, "Reload": plan.Reload,
 	} {
 		t.Run(name+"は外側のソケットだけを指す", func(t *testing.T) {
 			var sockets []string
