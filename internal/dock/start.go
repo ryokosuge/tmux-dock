@@ -42,6 +42,7 @@ func ExecRunner(ctx context.Context, args []string) (Result, error) {
 
 // EnsureSession は外側のセッションが無ければ p.Create で作る。あれば何も作らない。
 // has-session の終了コード 1（サーバ無しを含む）は「セッション無し」でありエラーにしない。
+// 同時起動で p.Create が負けた場合も、確かめ直しの has-session が 0 ならセッションがあるので成功として扱う。
 func EnsureSession(ctx context.Context, run Runner, p Plan) error {
 	res, err := run(ctx, p.HasSession)
 	if err != nil {
@@ -60,7 +61,14 @@ func EnsureSession(ctx context.Context, run Runner, p Plan) error {
 		return fmt.Errorf("tmux %s を実行できない: %w", strings.Join(p.Create, " "), err)
 	}
 	if res.ExitCode != 0 {
-		return execFailure(p.Create, res)
+		created := res
+		res, err = run(ctx, p.HasSession)
+		if err != nil {
+			return fmt.Errorf("tmux %s を実行できない: %w", strings.Join(p.HasSession, " "), err)
+		}
+		if res.ExitCode != 0 {
+			return execFailure(p.Create, created)
+		}
 	}
 	return nil
 }
