@@ -40,9 +40,19 @@ func ExecRunner(ctx context.Context, args []string) (Result, error) {
 	return res, err
 }
 
+// 健全な dock のセッションの形。
+const (
+	healthyWindows = 1
+	healthyPanes   = 2
+)
+
 // EnsureSession は外側のセッションが無ければ p.Create で作る。あれば作らず、p.Reload で同梱 conf を外側に流し直す。
 // has-session の終了コード 1（サーバ無しを含む）は「セッション無し」でありエラーにしない。
-// 同時起動で p.Create が負けた場合も、確かめ直しの has-session が 0 ならセッションがあるので成功として扱う。
+// 同時起動で p.Create が負けた場合も、確かめ直しの has-session が 0 ならセッションがあるものとして扱う。
+// セッションがあるときは、window が 1 つ・ペインが 2 つ・どのペインも終わっていないこと（健全）を p.ListPanes で確かめる。
+// 崩れは p.ListPanes を 1 回流した結果だけで判断し、崩れていれば p.Kill で消して p.Create を 1 回だけ流し直す。
+// 作り直して健全になったときも、-f は外側のサーバを新しく立てるときにしか読まれないので p.Reload を流す。
+// 流し直しの後も健全にならないときはエラーを返す（繰り返すと毎回失敗する部分作成で起動が終わらなくなるため）。
 func EnsureSession(ctx context.Context, run Runner, p Plan) error {
 	res, err := run(ctx, p.HasSession)
 	if err != nil {
@@ -50,7 +60,7 @@ func EnsureSession(ctx context.Context, run Runner, p Plan) error {
 	}
 	switch res.ExitCode {
 	case 0:
-		return reload(ctx, run, p)
+		return reloadIfHealthy(ctx, run, p, nil)
 	case hasSessionMissing:
 	default:
 		return execFailure(p.HasSession, res)
@@ -69,9 +79,78 @@ func EnsureSession(ctx context.Context, run Runner, p Plan) error {
 		if res.ExitCode != 0 {
 			return execFailure(p.Create, created)
 		}
-		return reload(ctx, run, p)
+		return reloadIfHealthy(ctx, run, p, &created)
 	}
 	return nil
+}
+
+// reloadIfHealthy は dock のセッションが健全なら conf を流し直し、崩れていれば作り直す。
+// created は直前の p.Create の失敗で、作り直しても健全にならないときのエラーに手がかりとして含める。
+func reloadIfHealthy(ctx context.Context, run Runner, p Plan, created *Result) error {
+	ok, _, err := checkHealthy(ctx, run, p)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return reload(ctx, run, p)
+	}
+	return rebuild(ctx, run, p, created)
+}
+
+// rebuild は崩れた dock のセッションを消して p.Create を流し直し、健全になったかを確かめて conf を流し直す。1 回だけ試す。
+// p.Kill が非 0 のときはセッションが既に無いだけなので続ける。
+func rebuild(ctx context.Context, run Runner, p Plan, created *Result) error {
+	if _, err := run(ctx, p.Kill); err != nil {
+		return fmt.Errorf("tmux %s を実行できない: %w", strings.Join(p.Kill, " "), err)
+	}
+	res, err := run(ctx, p.Create)
+	if err != nil {
+		return fmt.Errorf("tmux %s を実行できない: %w", strings.Join(p.Create, " "), err)
+	}
+	ok, panes, err := checkHealthy(ctx, run, p)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return reload(ctx, run, p)
+	}
+	if res.ExitCode != 0 {
+		return execFailure(p.Create, res)
+	}
+	if created != nil {
+		return fmt.Errorf("dock のセッションを作り直しても window %d・ペイン %d の健全な状態にならない（直前の作成の失敗: %w; list-panes: %q）",
+			healthyWindows, healthyPanes, execFailure(p.Create, *created), panes)
+	}
+	return fmt.Errorf("dock のセッションを作り直しても window %d・ペイン %d の健全な状態にならない（list-panes: %q）",
+		healthyWindows, healthyPanes, panes)
+}
+
+// checkHealthy は p.ListPanes を 1 回流して dock のセッションが健全かを返す。健全でないときは見た出力も返す。
+// 非 0 はセッションが無いことを表すので、崩れとして扱い作り直しに進ませる。
+func checkHealthy(ctx context.Context, run Runner, p Plan) (bool, string, error) {
+	res, err := run(ctx, p.ListPanes)
+	if err != nil {
+		return false, "", fmt.Errorf("tmux %s を実行できない: %w", strings.Join(p.ListPanes, " "), err)
+	}
+	if res.ExitCode == 0 && isHealthy(string(res.Stdout)) {
+		return true, "", nil
+	}
+	return false, strings.TrimSpace(string(res.Stdout) + " " + res.Stderr), nil
+}
+
+// isHealthy は list-panes の出力（"<window_index> <pane_dead>" の行）が window 1・ペイン 2・全ペイン生存かを返す。
+func isHealthy(out string) bool {
+	windows := map[string]bool{}
+	panes := 0
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 || fields[1] != "0" {
+			return false
+		}
+		windows[fields[0]] = true
+		panes++
+	}
+	return len(windows) == healthyWindows && panes == healthyPanes
 }
 
 // reload は既存の外側に同梱 conf を流し直す。set -g / bind は何度流しても結果が同じ。

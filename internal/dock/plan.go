@@ -1,6 +1,6 @@
 package dock
 
-// Plan は外側の tmux を起動する 4 つの tmux 呼び出しの引数。
+// Plan は外側の tmux を起動する tmux 呼び出しの引数。
 // 先頭の "tmux" は含まない。
 type Plan struct {
 	HasSession []string
@@ -8,6 +8,11 @@ type Plan struct {
 	Attach     []string
 	// Reload は既に動いている外側に同梱 conf を流し直す。-f は外側の起動時にしか読まれないため。
 	Reload []string
+	// ListPanes は dock のセッションの全 window の全ペインを 1 行ずつ "<window_index> <pane_dead>" で出す。
+	// 完全一致にするため、window 側の解決に流れない "=name:" の形で指す。
+	ListPanes []string
+	// Kill は崩れた dock のセッションを完全一致で消す。作り直しに使う。
+	Kill []string
 }
 
 // NewPlan は外側のソケットだけを指す起動手順を組み立てる。tmux は呼ばない。
@@ -23,8 +28,10 @@ func NewPlan(cfg Config, confPath string, leftCommand, rightCommand []string) Pl
 			"new-session", "-d", "-s", cfg.SessionName), append(append(append([]string{}, leftCommand...),
 			";",
 			"split-window", "-h", "-t", target+":"), rightCommand...)...),
-		Attach: join(outer, "attach-session", "-t", target),
-		Reload: join(outer, "source-file", confPath),
+		Attach:    join(outer, "attach-session", "-t", target),
+		Reload:    join(outer, "source-file", confPath),
+		ListPanes: join(outer, "list-panes", "-s", "-t", target+":", "-F", "#{window_index} #{pane_dead}"),
+		Kill:      join(outer, "kill-session", "-t", target),
 	}
 }
 
