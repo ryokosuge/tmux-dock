@@ -3,7 +3,6 @@ package dock
 import (
 	"context"
 	"errors"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -27,11 +26,6 @@ const (
 	healthyPanesOut = "0 0\n0 0\n"
 	singlePaneOut   = "0 0\n"
 )
-
-func TestMain(m *testing.M) {
-	healthyWait, healthyPoll = 0, 0
-	os.Exit(m.Run())
-}
 
 func (r *recordingRunner) run(_ context.Context, args []string) (Result, error) {
 	r.calls = append(r.calls, args)
@@ -155,7 +149,7 @@ func TestEnsureSession(t *testing.T) {
 		if err := EnsureSession(context.Background(), r.run, p); err != nil {
 			t.Fatalf("EnsureSession() = %v, want nil", err)
 		}
-		if want := [][]string{p.HasSession, p.ListPanes, p.Kill, p.Create, p.ListPanes}; !reflect.DeepEqual(r.calls, want) {
+		if want := [][]string{p.HasSession, p.ListPanes, p.Kill, p.Create, p.ListPanes, p.Reload}; !reflect.DeepEqual(r.calls, want) {
 			t.Errorf("tmux の呼び出し = %v, want %v", r.calls, want)
 		}
 	})
@@ -165,7 +159,7 @@ func TestEnsureSession(t *testing.T) {
 		if err := EnsureSession(context.Background(), r.run, p); err != nil {
 			t.Fatalf("EnsureSession() = %v, want nil", err)
 		}
-		if want := [][]string{p.HasSession, p.ListPanes, p.Kill, p.Create, p.ListPanes}; !reflect.DeepEqual(r.calls, want) {
+		if want := [][]string{p.HasSession, p.ListPanes, p.Kill, p.Create, p.ListPanes, p.Reload}; !reflect.DeepEqual(r.calls, want) {
 			t.Errorf("tmux の呼び出し = %v, want %v", r.calls, want)
 		}
 	})
@@ -183,6 +177,30 @@ func TestEnsureSession(t *testing.T) {
 		}
 		if want := [][]string{p.HasSession, p.Create, p.HasSession, p.ListPanes, p.Kill, p.Create, p.ListPanes}; !reflect.DeepEqual(r.calls, want) {
 			t.Errorf("tmux の呼び出し = %v, want %v", r.calls, want)
+		}
+	})
+
+	t.Run("作り直しの Create が負けても相手が健全にしていれば conf を流し直して成功する", func(t *testing.T) {
+		r := &recordingRunner{
+			create: Result{ExitCode: 1, Stderr: "duplicate session: dock"},
+			panes:  []Result{{Stdout: []byte(singlePaneOut)}, {Stdout: []byte(healthyPanesOut)}},
+		}
+		if err := EnsureSession(context.Background(), r.run, p); err != nil {
+			t.Fatalf("EnsureSession() = %v, want nil", err)
+		}
+		if want := [][]string{p.HasSession, p.ListPanes, p.Kill, p.Create, p.ListPanes, p.Reload}; !reflect.DeepEqual(r.calls, want) {
+			t.Errorf("tmux の呼び出し = %v, want %v", r.calls, want)
+		}
+	})
+
+	t.Run("作り直した後の conf の流し直しが非 0 で終わったら stderr をエラーに含める", func(t *testing.T) {
+		r := &recordingRunner{
+			reload: Result{ExitCode: 1, Stderr: "no such file: dock.conf"},
+			panes:  []Result{{Stdout: []byte(singlePaneOut)}, {Stdout: []byte(healthyPanesOut)}},
+		}
+		err := EnsureSession(context.Background(), r.run, p)
+		if err == nil || !strings.Contains(err.Error(), "no such file: dock.conf") {
+			t.Errorf("EnsureSession() = %v, want stderr %q を含むエラー", err, "no such file: dock.conf")
 		}
 	})
 
