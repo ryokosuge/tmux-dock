@@ -19,8 +19,16 @@ func TestTmuxDockClipboard(t *testing.T) {
 	})
 
 	t.Run("右の内側のセッションでクリップボードへ書くコピーをすると外側の paste buffer に同じ文字が届き、普段のサーバの構成は起動前と同じ", func(t *testing.T) {
-		outer, inner := startDockWithLastUsedA(t, bin)
+		harness, outer, inner := newSockets(t)
+		for _, name := range []string{"a", "b"} {
+			tmuxOut(t, inner, "-f", "/dev/null", "new-session", "-d", "-s", name, "-n", "w")
+		}
 		before := innerLayout(t, inner)
+
+		startDock(t, bin, harness, outer, inner)
+		if got := waitClientSession(t, inner, "a"); got == "" {
+			t.Fatalf("右ペインのクライアントが %v 以内に繋がらない", paneWaitLimit)
+		}
 		marker := fmt.Sprintf("tdk-clip-%d", time.Now().UnixNano())
 		if buffers := tmuxQuiet(outer, "list-buffers"); strings.Contains(buffers, marker) {
 			t.Fatalf("コピー前の外側の list-buffers = %q, want %q を含まない", buffers, marker)
