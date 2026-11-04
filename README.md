@@ -9,7 +9,7 @@ clone した repo で `go install` する。
 go install ./cmd/tmux-dock
 ```
 
-Ghostty の起動コマンドはログインシェル経由で `tmux-dock` を探すので、`$(go env GOPATH)/bin` をログインシェルの PATH に通しておく。
+Ghostty の起動コマンドはログインシェル経由で `tmux-dock` を探すので、`go install` の入る先をログインシェルの PATH に通しておく。`go env GOBIN` が空なら `$(go env GOPATH)/bin`、設定していればその先（`$(go env GOBIN)`）に入る。
 
 ## Ghostty の設定
 
@@ -25,6 +25,14 @@ initial-command = /bin/zsh -l -c tmux-dock
 ```
 
 どちらか 1 行だけを書く。`initial-command` は最初の 1 枚の tab にだけ効くので、2 枚目以降の Ghostty の tab では tmux-dock は起動しない。
+
+window を残して Ghostty を終了すると、次の起動で前の window も復元される。一覧は `initial-command` が効く 1 つの window にしか出ず、復元された window では tmux-dock は起動しない。対処は、window を閉じてから Ghostty を終了すること。
+
+任意の設定。足すと終了時の window を復元しなくなる（`window-save-state` の既定 `default` は macOS のシステムの設定に従う）。
+
+```
+window-save-state = never
+```
 
 一覧と右を行き来するキーの行。Cmd+\ で F12 を送る。
 
